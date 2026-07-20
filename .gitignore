@@ -49,3 +49,10 @@ CLAUDE.md
 .agents/
 AGENTS.md
 docs/
+
+# AI-agents
+.cline/
+.clinerules/
+.kilocode/
+.qwen/
+.roo/
