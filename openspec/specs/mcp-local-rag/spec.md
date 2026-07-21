@@ -222,6 +222,407 @@ pnpm run check:fix         # Автофикс lint/format
 3. Просит ассистента: "Найди информацию об аутентификации в документации"
 4. Ассистент использует MCP инструменты для поиска
 
+## Классы и публичные методы
+
+### Диаграмма классов
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              RAGServer                                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│ - server: Server (MCP)                                                   │
+│ - vectorStore: VectorStore                                               │
+│ - embedder: Embedder                                                     │
+│ - chunker: SemanticChunker                                               │
+│ - parser: DocumentParser                                                 │
+│ - baseDirs: string[]                                                     │
+│ - dbPath: string                                                         │
+│ - cacheDir: string                                                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│ + initialize(): Promise<void>                                            │
+│ + run(): Promise<void>                                                   │
+│ + handleQueryDocuments(args): { content }                                │
+│ + handleIngestFile(raw): { content }                                     │
+│ + handleIngestData(args): { content }                                    │
+│ + handleDeleteFile(raw): { content }                                     │
+│ + handleListFiles(input): { content }                                    │
+│ + handleStatus(): { content }                                            │
+│ + handleReadChunkNeighbors(raw): { content }                             │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────┐   ┌─────────────────────┐   ┌─────────────────────┐
+│    VectorStore      │   │      Embedder       │   │  SemanticChunker    │
+├─────────────────────┤   ├─────────────────────┤   ├─────────────────────┤
+│ - db: Connection    │   │ - model: unknown    │   │ - config: Config    │
+│ - table: Table      │   │ - initPromise       │   │                     │
+│ - config: Config    │   │ - config: Config    │   │                     │
+│ - ftsEnabled: bool  │   │                     │   │                     │
+├─────────────────────┤   ├─────────────────────┤   ├─────────────────────┤
+│ + initialize()      │   │ + initialize()      │   │ + chunkText()       │
+│ + insertChunks()    │   │ + embed()           │   │                     │
+│ + search()          │   │ + embedBatch()      │   │                     │
+│ + deleteChunks()    │   │ + dispose()         │   │                     │
+│ + listFiles()       │   │                     │   │                     │
+│ + getStatus()       │   │                     │   │                     │
+│ + close()           │   │                     │   │                     │
+│ + optimize()        │   │                     │   │                     │
+└─────────────────────┘   └─────────────────────┘   └─────────────────────┘
+                                    │                       │
+                                    ▼                       ▼
+┌─────────────────────┐   ┌─────────────────────┐   ┌─────────────────────┐
+│  DocumentParser     │   │  PdfVisual (опц.)   │   │   LanceDB (БД)      │
+├─────────────────────┤   ├─────────────────────┤   ├─────────────────────┤
+│ - config: Config    │   │ - captioner: Cap... │   │ - Connection         │
+│ - rawBaseDirs       │   │ - cacheDir: string  │   │ - Table              │
+│ - resolvedBaseDirs  │   │ - device: string    │   │                     │
+├─────────────────────┤   ├─────────────────────┤   ├─────────────────────┤
+│ + parseFile()       │   │ + captionPages()    │   │ + connect()          │
+│ + parsePdf()        │   │ + detectFigures()   │   │ + createTable()      │
+│ + parseDocx()       │   │ + generateCaptions()│   │ + query()            │
+│ + parseTxt()        │   │                     │   │ + add()              │
+│ + parseMd()         │   │                     │   │ + delete()           │
+│ + validateFilePath()│   │                     │   │ + optimize()         │
+│ + validateFileSize()│   │                     │   │ + close()            │
+└─────────────────────┘   └─────────────────────┘   └─────────────────────┘
+```
+
+### Описание классов
+
+#### RAGServer
+Главный класс-оркестратор. Реализует MCP-сервер и управляет всеми компонентами системы.
+- **Ответственность:** Роутинг MCP-запросов, координация между компонентами, обработка ошибок
+- **Зависимости:** VectorStore, Embedder, SemanticChunker, DocumentParser
+- **Жизненный цикл:** Конфигурация → initialize() → run() → graceful shutdown
+
+#### VectorStore
+Обёртка над LanceDB для хранения и поиска векторов.
+- **Ответственность:** CRUD-операции с чанками, векторный поиск, FTS-индекс, оптимизация
+- **Особенности:** Поддержка транзакций (backup/rollback при реингесте), гибридный поиск
+- **Схема:** filePath, chunkIndex, text, embedding (вектор), timestamp, fileSize, fileTitle
+
+#### Embedder
+Генерация эмбеддингов через Transformers.js.
+- **Ответственность:** Создание векторных представлений текста
+- **Модель:** Настраивается через `MODEL_NAME` (по умолчанию `Xenova/all-MiniLM-L6-v2`)
+- **Особенности:** Lazy initialization, batch processing (batchSize=16), поддержка quantization (fp32, fp16, q8, int8)
+- **Устройства:** CPU (по умолчанию), WebGPU (опционально)
+
+#### SemanticChunker
+Семантическое разбиение текста на чанки.
+- **Алгоритм:** Max-Min (на основе Springer, 2025)
+- **Ответственность:** Определение смысловых границ текста
+- **Параметры:** hardThreshold=0.6, initConst=1.5, c=0.9, minChunkLength=50
+- **Оптимизация:** Окно сравнения 5 предложений, лимит 15 предложений на чанк
+
+#### DocumentParser
+Парсинг документов различных форматов.
+- **Форматы:** PDF (mupdf), DOCX (mammoth), TXT, MD
+- **Безопасность:** Валидация путей (realpath-нормализация), проверка размера (100MB)
+- **PDF-специфика:** Фильтрация header/footer через семантическое сравнение, извлечение метаданных
+
+#### PdfVisual (опционально)
+Визуальный режим обработки PDF через VLM.
+- **Ответственность:** Генерация подписей к изображениям и диаграммам
+- **Профили:** fast (SmolVLM-256M, ~250MB), quality (Qwen2.5-VL-3B, ~2.9GB)
+
+---
+
+## Публичные методы API
+
+### MCP Инструменты
+
+#### query_documents
+Семантический поиск с keyword boost.
+
+```typescript
+interface QueryDocumentsInput {
+  query: string;           // Поисковый запрос
+  limit?: number;          // Максимум результатов (1-20, по умолчанию 10)
+  scope?: string | string[]; // Фильтр по пути (абсолютный префикс)
+}
+
+interface QueryResult {
+  filePath: string;        // Путь к файлу
+  chunkIndex: number;      // Индекс чанка
+  text: string;            // Текст чанка
+  score: number;           // Оценка релевантности (0 = лучший)
+  fileTitle: string | null; // Заголовок файла
+  source?: string;         // Идентификатор источника (для ingest_data)
+}
+```
+
+**Алгоритм:**
+1. Генерация эмбеддинга запроса
+2. Векторный поиск (кандидаты = limit × 20)
+3. Применение scope-фильтра
+4. Применение distance threshold
+5. Grouping по семантическим разрывам
+6. Keyword boost через FTS
+7. File filter (maxFiles)
+8. Сортировка и ограничение результатов
+
+#### ingest_file
+Загрузка файла в индекс.
+
+```typescript
+interface IngestFileInput {
+  filePath: string;        // Абсолютный путь к файлу
+  visual?: boolean;        // Включить VLM-подписи (PDF)
+  visualQuality?: 'fast' | 'quality'; // Профиль VLM
+}
+
+interface IngestResult {
+  filePath: string;
+  chunkCount: number;
+  timestamp: string;       // ISO 8601
+  fileTitle: string | null;
+}
+```
+
+**Особенности:**
+- Transactional re-ingestion: backup → delete → insert → optimize
+- При ошибке вставки — автоматический rollback
+- Поддержка визуального режима для PDF
+
+#### ingest_data
+Загрузка контента из памяти.
+
+```typescript
+interface IngestDataInput {
+  content: string;         // Текст или HTML
+  metadata: {
+    source: string;        // Идентификатор источника (URL, "clipboard://...", "chat://...")
+    format: 'text' | 'html' | 'markdown';
+  };
+}
+```
+
+**Особенности:**
+- HTML автоматически конвертируется в Markdown через Readability
+- Контент сохраняется в `dbPath/raw-data/`
+- Метаданные сохраняются в `.meta.json`
+
+#### delete_file
+Удаление из индекса.
+
+```typescript
+interface DeleteFileInput {
+  filePath?: string;       // Для ingest_file
+  source?: string;         // Для ingest_data
+}
+
+interface DeleteFileResult {
+  deleted: boolean;        // Операция выполнена
+  removedChunks: number;   // Удалённых чанков
+  existed: boolean;        // Было ли что удалять
+}
+```
+
+#### list_files
+Список файлов и источников.
+
+```typescript
+interface ListFilesInput {
+  scope?: string | string[]; // Фильтр по пути
+}
+
+interface ListFilesResult {
+  baseDirs: string[];        // Все корневые директории
+  baseDir?: string;          // Первая директория (legacy)
+  files: FileEntry[];        // Файлы из файловой системы
+  sources: SourceEntry[];    // Источники из ingest_data
+}
+
+interface FileEntry {
+  filePath: string;
+  chunkCount: number;
+  timestamp: string;
+  ingested: boolean;
+  baseDir: string;           // Директория-источник
+}
+
+interface SourceEntry {
+  source: string;
+  ingested: boolean;
+}
+```
+
+#### read_chunk_neighbors
+Чтение соседних чанков для контекста.
+
+```typescript
+interface ReadChunkNeighborsInput {
+  filePath?: string;         // Для ingest_file
+  source?: string;           // Для ingest_data
+  chunkIndex: number;        // Целевой чанк
+  before?: number;           // Соседи до (0-50, по умолчанию 2)
+  after?: number;            // Соседи после (0-50, по умолчанию 2)
+}
+
+interface ReadChunkNeighborsResultItem {
+  chunkIndex: number;
+  text: string;
+  isTarget: boolean;         // true для целевого чанка
+}
+```
+
+#### status
+Статус системы.
+
+```typescript
+interface StatusResult {
+  documentCount: number;     // Количество файлов
+  chunkCount: number;        // Количество чанков
+  memoryUsage: number;       // MB
+  uptime: number;            // секунды
+  ftsIndexEnabled: boolean;  // Включён ли FTS
+  searchMode: 'hybrid' | 'vector-only';
+}
+```
+
+---
+
+## LLM и модели
+
+### Эмбеддинги (основная функция)
+
+| Модель | Размер | Размерность | Описание |
+|--------|--------|-------------|----------|
+| `Xenova/all-MiniLM-L6-v2` | ~90 MB | 384 | Модель по умолчанию, баланс скорость/качество |
+| `sentence-transformers/all-MiniLM-L12-v2` | ~150 MB | 384 | Улучшенная версия, больше слоёв |
+| `BAAI/bge-small-en-v1.5` | ~130 MB | 384 | Хорош для английского |
+| `Xenova/multilingual-e5-large` | ~1.3 GB | 1024 | Мультиязычная, высокая точность |
+
+**Настройка:** `MODEL_NAME` (HuggingFace путь)
+
+**Квантование:** fp32 (по умолчанию), fp16, q8, int8 — через `RAG_DTYPE`
+
+### VLM для визуального режима PDF
+
+| Профиль | Модель | Размер | Назначение |
+|---------|--------|--------|------------|
+| `fast` | `HuggingFaceTB/SmolVLM-256M-Instruct` | ~250 MB | Быстрые подписи к изображениям |
+| `quality` | `onnx-community/Qwen2.5-VL-3B-Instruct-ONNX` | ~2.9 GB | Высокая точность, текстовые области |
+
+**Настройка:** `visual=true` + `visualQuality=fast|quality`
+
+### Ограничения
+
+- Все модели загружаются из HuggingFace при первом использовании
+- После загрузки — полная автономность
+- Кэш моделей: `CACHE_DIR` (по умолчанию `./models/`)
+- Поддержка устройств: CPU (всегда), WebGPU (опционально, через `RAG_DEVICE=webgpu`)
+
+---
+
+## Способы подключения
+
+### 1. MCP Сервер (для AI-ассистентов)
+
+**Запуск:**
+```bash
+# Прямо через npx
+npx mcp-local-rag
+
+# Или через установленный пакет
+mcp-local-rag
+
+# С кастомной конфигурацией через переменные окружения
+BASE_DIR=./docs MODEL_NAME=Xenova/all-MiniLM-L6-v2 mcp-local-rag
+```
+
+**Подключение клиентов:**
+
+**Cursor:**
+```json
+{
+  "mcpServers": {
+    "rag": {
+      "command": "npx",
+      "args": ["mcp-local-rag"],
+      "env": {
+        "BASE_DIR": "./docs"
+      }
+    }
+  }
+}
+```
+
+**Claude Code:**
+```bash
+claude mcp add rag npx mcp-local-rag --env BASE_DIR=./docs
+```
+
+**Codex:**
+```toml
+# ~/.codex/config.toml
+[mcp.rag]
+command = "npx"
+args = ["mcp-local-rag"]
+env = { BASE_DIR = "./docs" }
+```
+
+### 2. CLI (командная строка)
+
+**Базовые команды:**
+```bash
+# Ингестия
+npx mcp-local-rag ingest ./docs/
+npx mcp-local-rag ingest ./docs/ --visual --visual-quality quality
+
+# Поиск
+npx mcp-local-rag query "authentication API"
+npx mcp-local-rag query "authentication" --scope /docs/api --limit 5
+
+# Статус
+npx mcp-local-rag status
+npx mcp-local-rag list
+
+# Удаление
+npx mcp-local-rag delete ./docs/manual.pdf
+```
+
+### 3. Программный API (для интеграции)
+
+**Импортируемые модули:**
+```typescript
+import { RAGServer } from 'mcp-local-rag/dist/server/index.js'
+import { VectorStore } from 'mcp-local-rag/dist/vectordb/index.js'
+import { Embedder } from 'mcp-local-rag/dist/embedder/index.js'
+import { SemanticChunker } from 'mcp-local-rag/dist/chunker/index.js'
+import { DocumentParser } from 'mcp-local-rag/dist/parser/index.js'
+```
+
+**Пример использования:**
+```typescript
+const server = new RAGServer({
+  dbPath: './lancedb/',
+  modelName: 'Xenova/all-MiniLM-L6-v2',
+  cacheDir: './models/',
+  baseDirs: ['./docs/'],
+  maxFileSize: 100 * 1024 * 1024,
+});
+
+await server.initialize();
+await server.run();
+```
+
+### 4. Agent Skills (для AI-ассистентов)
+
+**Установка для Claude Code:**
+```bash
+npx mcp-local-rag skills install --claude-code
+npx mcp-local-rag skills install --claude-code --global
+```
+
+**Установка для Codex:**
+```bash
+npx mcp-local-rag skills install --codex
+```
+
+---
+
 ## Нефункциональные требования
 
 ### Производительность
