@@ -235,6 +235,126 @@ npx mcp-local-rag delete --source "https://..."  # Удалить по URL ис�
 
 > ⚠️ CLI **не читает** вашу конфигурацию MCP-клиента (`mcp.json`, `config.toml` и т.д.). Настройте CLI через флаги или переменные окружения, как показано ниже.
 
+### Примеры командной строки
+
+#### Базовое использование
+
+```bash
+# Загрузка одного файла
+npx mcp-local-rag ingest ./docs/api-spec.pdf
+
+# Загрузка всей директории
+npx mcp-local-rag ingest ./docs/
+
+# Поиск по документам
+npx mcp-local-rag query "API аутентификации"
+
+# Поиск с пользовательским лимитом
+npx mcp-local-rag query "аутентификация" --limit 5
+
+# Показать все загруженные файлы
+npx mcp-local-rag list
+
+# Показать статистику базы данных
+npx mcp-local-rag status
+```
+
+#### Использование пользовательских путей
+
+```bash
+# Использовать пользовательское расположение базы данных
+npx mcp-local-rag --db-path ./my-db query "аутентификация"
+
+# Использовать пользовательскую директорию кэша моделей
+npx mcp-local-rag --cache-dir ./cache query "поисковый запрос"
+
+# Использовать пользовательскую модель (должна совпадать с MODEL_NAME MCP-сервера)
+npx mcp-local-rag --model-name Xenova/all-MiniLM-L6-v2 query "поиск"
+```
+
+#### Директории с несколькими корнями
+
+```bash
+# Загрузка с несколькими корнями документов
+npx mcp-local-rag ingest --base-dir ./docs --base-dir ./specs ./docs/readme.md
+
+# Показать файлы из конкретных корней
+npx mcp-local-rag list --base-dir ./docs --base-dir ./specs
+
+# Поиск только в документации API
+npx mcp-local-rag query "auth" --scope /docs/api
+```
+
+#### Настройка поиска
+
+```bash
+# Поиск с повышением по ключевым словам (выше значение = сильнее повышение)
+RAG_HYBRID_WEIGHT=0.7 npx mcp-local-rag query "useEffect"
+
+# Получить только верхнюю группу результатов
+RAG_GROUPING=similar npx mcp-local-rag query "обработка ошибок"
+
+# Фильтрация по порогу релевантности
+RAG_MAX_DISTANCE=0.5 npx mcp-local-rag query "аутентификация"
+
+# Ограничить одним лучшим файлом
+RAG_MAX_FILES=1 npx mcp-local-rag query "документация API"
+```
+
+#### Использование бэкенда llama.cpp
+
+```bash
+# Загрузка с бэкендом llama.cpp
+EMBEDDING_BACKEND=llama-cpp LLAMA_CPP_SERVER_URL=http://127.0.0.1:8080 \
+  npx mcp-local-rag ingest ./docs/
+
+# Поиск с бэкендом llama.cpp
+EMBEDDING_BACKEND=llama-cpp LLAMA_CPP_BATCH_SIZE=32 \
+  npx mcp-local-rag query "технические термины"
+```
+
+#### Визуальный режим PDF
+
+```bash
+# Загрузка PDF с визуальными подписями (профиль fast)
+npx mcp-local-rag ingest ./docs/paper.pdf --visual
+
+# Загрузка PDF с профилем качества
+npx mcp-local-rag ingest ./docs/paper.pdf --visual --visual-quality quality
+```
+
+#### Конвейеризация результатов
+
+```bash
+# Поиск и фильтрация с помощью jq
+npx mcp-local-rag query "аутентификация" | jq '.results[] | select(.score > 0.7)'
+
+# Поиск и подсчёт результатов
+npx mcp-local-rag query "обработка ошибок" | jq '.results | length'
+
+# Поиск и извлечение только путей к файлам
+npx mcp-local-rag query "API" | jq -r '.results[].filePath'
+```
+
+#### Конфигурация с переменными окружения
+
+```bash
+# Установить всю конфигурацию в одной команде
+export BASE_DIR=./docs
+export DB_PATH=./lancedb
+export RAG_HYBRID_WEIGHT=0.7
+
+npx mcp-local-rag query "аутентификация"
+```
+
+#### Приоритет конфигурации
+
+1. **Флаги CLI** (наивысший приоритет) — `npx mcp-local-rag --db-path ./my-db query "auth"`
+2. **Переменные окружения** — `export DB_PATH=./my-db && npx mcp-local-rag query "auth"`
+3. **Значения по умолчанию** — применяются, когда не установлены ни флаги, ни env-переменные
+
+> ⚠️ CLI **не читает** вашу конфигурацию MCP-клиента (`mcp.json`, `config.toml` и т.д.). Настройте CLI через флаги или переменные окружения, как показано ниже.
+
 #### Конфигурация
 
 **Флаги CLI** — глобальные опции идут перед подкомандой, опции подкоманды — после:
