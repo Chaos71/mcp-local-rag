@@ -398,6 +398,75 @@ MCP-сервер настраивается только переменными 
 
 ⚠️ Изменение `MODEL_NAME` меняет размерность эмбеддингов. Удалите `DB_PATH` и перезаряжайте после переключения моделей.
 
+### Бэкенд llama.cpp (локальная LLM)
+
+Для пользователей, которые хотят использовать современные модели эмбеддингов, доступные только в формате GGUF (например, **Qwen3-Embedding-4B**, **nomic-embed-text-v1.5**), mcp-local-rag поддерживает вторичный бэкенд эмбеддингов, работающий через llama.cpp.
+
+**Поддерживаемые модели:**
+
+| Модель | Размерность | Источник |
+|--------|-------------|----------|
+| Qwen/Qwen3-Embedding-4B | 4096 | [HuggingFace](https://huggingface.co/Qwen/Qwen3-Embedding-4B) |
+| nomic-ai/nomic-embed-text-v1.5 | 768 | [HuggingFace](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5) |
+
+**Настройка:**
+
+1. Установите llama.cpp и скачайте GGUF-модель эмбеддингов:
+   ```bash
+   # Скачайте Qwen3-Embedding-4B
+   huggingface-cli download Qwen/Qwen3-Embedding-4B --include "*.gguf"
+   ```
+
+2. Запустите сервер llama.cpp:
+   ```bash
+   llama-server --model ./Qwen3-Embedding-4B.gguf --port 8080 --embedding
+   ```
+
+3. Настройте mcp-local-rag на использование бэкенда llama.cpp:
+
+   **MCP-клиент (Cursor/Codex/Claude Code):**
+   ```json
+   {
+     "mcpServers": {
+       "local-rag": {
+         "command": "npx",
+         "args": ["-y", "mcp-local-rag"],
+         "env": {
+           "BASE_DIR": "/путь/к/вашим/документам",
+           "EMBEDDING_BACKEND": "llama-cpp",
+           "LLAMA_CPP_SERVER_URL": "http://127.0.0.1:8080"
+         }
+       }
+     }
+   }
+   ```
+
+   **CLI:**
+   ```bash
+   EMBEDDING_BACKEND=llama-cpp LLAMA_CPP_SERVER_URL=http://127.0.0.1:8080 \
+     npx mcp-local-rag ingest ./docs/
+   ```
+
+**Параметры конфигурации:**
+
+| Переменная окружения | Флаг CLI | По умолчанию | Описание |
+|---------------------|----------|---------|----------|
+| `EMBEDDING_BACKEND` | `--embedding-backend` | `transformers` | Бэкенд: `transformers` или `llama-cpp` |
+| `LLAMA_CPP_SERVER_URL` | — | `http://127.0.0.1:8080` | URL сервера llama.cpp |
+| `LLAMA_CPP_BATCH_SIZE` | — | `16` | Размер батча для запросов (1–128) |
+| `LLAMA_CPP_TIMEOUT` | — | `30000` | Таймаут запроса в миллисекундах (1000–300000) |
+| `RAG_LLAMA_CPP_DIMENSIONS` | — | `4096` | Переопределение размерности эмбеддингов (для моделей не-Qwen3) |
+
+**Преимущества:**
+- Доступ к современным GGUF-моделям, недоступным в Transformers.js
+- Ускорение через GPU via CUDA/Vulkan (если поддерживается вашим оборудованием)
+- Сервер может работать на отдельной машине
+
+**Ограничения:**
+- Требуется отдельный процесс сервера llama.cpp
+- HTTP-задержка (~5-15 мс на запрос)
+- Нет автоматического управления моделями
+
 ### Корневые директории документов (`BASE_DIR` и `BASE_DIRS`)
 
 mcp-local-rag обеспечивает границу безопасности: только файлы в пределах настроенного корня доступны для операций загрузки, списка, удаления или чтения соседей.

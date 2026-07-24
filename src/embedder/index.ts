@@ -35,6 +35,41 @@ export interface EmbedderConfig {
 }
 
 // ============================================
+// Embedder Interface
+// ============================================
+
+/**
+ * Unified interface for embedding backends.
+ * Both Transformers.js and llama.cpp backends implement this interface.
+ */
+export interface IEmbedder {
+  /**
+   * Generate embedding vector for a single text
+   */
+  embed(text: string): Promise<number[]>
+
+  /**
+   * Generate embedding vectors for multiple texts
+   */
+  embedBatch(texts: string[]): Promise<number[][]>
+
+  /**
+   * Initialize the embedder (lazy initialization on first use)
+   */
+  initialize(): Promise<void>
+
+  /**
+   * Release resources held by the embedder
+   */
+  dispose(): Promise<void>
+
+  /**
+   * Return the embedding dimensionality (e.g., 384 for MiniLM, 4096 for Qwen3)
+   */
+  getDimensions(): number
+}
+
+// ============================================
 // Error Classes
 // ============================================
 
@@ -60,7 +95,7 @@ export class EmbeddingError extends AppError {
  * - Transformers.js wrapper
  * - Batch processing (size 8)
  */
-export class Embedder {
+export class Embedder implements IEmbedder {
   // Using unknown to avoid TS2590 (union type too complex with @types/jsdom)
   private model: unknown = null
   private initPromise: Promise<void> | null = null
@@ -84,6 +119,15 @@ export class Embedder {
     }
     this.model = null
     this.initPromise = null
+  }
+
+  /**
+   * Return the embedding dimensionality for this model.
+   * MiniLM-L6-v2 returns 384 dimensions.
+   */
+  getDimensions(): number {
+    // all-MiniLM-L6-v2 produces 384-dimensional embeddings
+    return 384
   }
 
   /**

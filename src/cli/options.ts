@@ -109,10 +109,23 @@ export function requireFlagValue(argv: string[], flagIndex: number, flag: string
 // Types
 // ============================================
 
+/**
+ * Supported embedding backends.
+ * - `transformers`: Transformers.js (default, local ONNX model)
+ * - `llama-cpp`: llama.cpp HTTP server (requires manual server startup)
+ */
+export type EmbeddingBackend = 'transformers' | 'llama-cpp'
+
 export interface GlobalOptions {
   dbPath?: string | undefined
   cacheDir?: string | undefined
   modelName?: string | undefined
+  /**
+   * Embedding generation backend.
+   * - `transformers`: Transformers.js (default, local ONNX model)
+   * - `llama-cpp`: llama.cpp HTTP server (requires manual server startup)
+   */
+  embeddingBackend?: EmbeddingBackend | undefined
 }
 
 export interface ParsedGlobalResult {
@@ -146,6 +159,8 @@ Options:
   --db-path <path>       LanceDB database path (default: ${GLOBAL_DEFAULTS.dbPath})
   --cache-dir <path>     Model cache directory (default: ${GLOBAL_DEFAULTS.cacheDir})
   --model-name <name>    Embedding model (default: ${GLOBAL_DEFAULTS.modelName})
+  --embedding-backend <backend>
+                         Embedding backend: "transformers" or "llama-cpp" (default: transformers)
   -h, --help             Show this help
 
 Commands:
@@ -194,6 +209,18 @@ export function parseGlobalOptions(args: string[]): ParsedGlobalResult {
       }
       case '--model-name': {
         globalOptions.modelName = requireFlagValue(args, i, '--model-name')
+        i += 2
+        break
+      }
+      case '--embedding-backend': {
+        const value = requireFlagValue(args, i, '--embedding-backend').toLowerCase().trim()
+        if (value !== 'transformers' && value !== 'llama-cpp') {
+          console.error(
+            `Invalid --embedding-backend value: "${value}". Expected "transformers" or "llama-cpp".`
+          )
+          process.exit(1)
+        }
+        globalOptions.embeddingBackend = value
         i += 2
         break
       }

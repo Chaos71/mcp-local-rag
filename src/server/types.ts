@@ -1,5 +1,6 @@
 // Type definitions for RAGServer
 
+import type { EmbeddingBackend, LlamaCppConfig } from '../embedder/types.js'
 import type { BaseDirsConfigError } from '../utils/base-dirs.js'
 import type { ContentFormat } from '../utils/raw-data-utils.js'
 import type { GroupingMode } from '../vectordb/index.js'
@@ -50,6 +51,18 @@ interface RAGServerConfigBase {
    * semantics.
    */
   configError?: BaseDirsConfigError
+  /**
+   * Embedding generation backend.
+   * - `transformers`: Transformers.js (default, local ONNX model)
+   * - `llama-cpp`: llama.cpp HTTP server (requires manual server startup)
+   * Default: `transformers`
+   */
+  embeddingBackend?: EmbeddingBackend
+  /**
+   * Configuration for llama.cpp backend.
+   * Required when `embeddingBackend` is `llama-cpp`.
+   */
+  llamaCppConfig?: LlamaCppConfig
 }
 
 /**

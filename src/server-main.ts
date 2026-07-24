@@ -1,5 +1,6 @@
 // MCP Server entry point
 import { resolveDevice, resolveDtype } from './cli/options.js'
+import type { EmbeddingBackend } from './embedder/types.js'
 import { RAGServer } from './server/index.js'
 import { BaseDirsConfigError, parseBaseDirsEnv, resolveBaseDirs } from './utils/base-dirs.js'
 import { DEFAULT_MAX_FILE_SIZE } from './utils/limits.js'
@@ -82,6 +83,62 @@ export function parseChunkMinLength(value: string | undefined): ParseResult<numb
 }
 
 // ============================================
+// Embedding Backend Parsers
+// ============================================
+
+/**
+ * Parse embedding backend from environment variable
+ */
+export function parseEmbeddingBackend(value: string | undefined): ParseResult<EmbeddingBackend> {
+  if (!value) return { value: 'transformers' }
+  const normalized = value.toLowerCase().trim()
+  if (normalized === 'transformers' || normalized === 'llama-cpp') {
+    return { value: normalized }
+  }
+  const warning = `Invalid EMBEDDING_BACKEND value: "${value.slice(0, 100)}". Expected "transformers" or "llama-cpp". Using default (transformers).`
+  return { value: 'transformers', warning }
+}
+
+/**
+ * Parse llama.cpp server URL from environment variable
+ */
+export function parseLlamaCppServerUrl(value: string | undefined): ParseResult<string> {
+  if (!value) return { value: undefined }
+  // Basic URL validation - must start with http:// or https://
+  if (!value.startsWith('http://') && !value.startsWith('https://')) {
+    const warning = `Invalid LLAMA_CPP_SERVER_URL value: "${value.slice(0, 100)}". Must start with http:// or https://. Ignoring.`
+    return { value: undefined, warning }
+  }
+  return { value }
+}
+
+/**
+ * Parse llama.cpp batch size from environment variable
+ */
+export function parseLlamaCppBatchSize(value: string | undefined): ParseResult<number> {
+  if (!value) return { value: undefined }
+  const parsed = Number.parseInt(value, 10)
+  if (Number.isNaN(parsed) || parsed < 1 || parsed > 128) {
+    const warning = `Invalid LLAMA_CPP_BATCH_SIZE value: "${value.slice(0, 100)}". Expected integer between 1 and 128. Ignoring.`
+    return { value: undefined, warning }
+  }
+  return { value: parsed }
+}
+
+/**
+ * Parse llama.cpp timeout from environment variable
+ */
+export function parseLlamaCppTimeout(value: string | undefined): ParseResult<number> {
+  if (!value) return { value: undefined }
+  const parsed = Number.parseInt(value, 10)
+  if (Number.isNaN(parsed) || parsed < 1000 || parsed > 300000) {
+    const warning = `Invalid LLAMA_CPP_TIMEOUT value: "${value.slice(0, 100)}". Expected integer between 1000 and 300000 (ms). Ignoring.`
+    return { value: undefined, warning }
+  }
+  return { value: parsed }
+}
+
+// ============================================
 // Server Startup
 // ============================================
 
@@ -103,6 +160,16 @@ export async function resolveServerConfig(
   // (see below), preserving the unset signal for the embedder's fp32 default.
   const dtype = resolveDtype(env['RAG_DTYPE'])
   const configWarnings: string[] = []
+
+  // Embedding backend configuration
+  const embeddingBackend = parseEmbeddingBackend(env['EMBEDDING_BACKEND'])
+  const llamaCppServerUrl = parseLlamaCppServerUrl(env['LLAMA_CPP_SERVER_URL'])
+  const llamaCppBatchSize = parseLlamaCppBatchSize(env['LLAMA_CPP_BATCH_SIZE'])
+  const llamaCppTimeout = parseLlamaCppTimeout(env['LLAMA_CPP_TIMEOUT'])
+  if (embeddingBackend.warning) configWarnings.push(embeddingBackend.warning)
+  if (llamaCppServerUrl.warning) configWarnings.push(llamaCppServerUrl.warning)
+  if (llamaCppBatchSize.warning) configWarnings.push(llamaCppBatchSize.warning)
+  if (llamaCppTimeout.warning) configWarnings.push(llamaCppTimeout.warning)
 
   // Sensitive-path pre-check on the RAW user-supplied paths, before the
   // resolver realpath-normalizes them (on macOS `/etc` → `/private/etc`, which
@@ -191,6 +258,23 @@ export async function resolveServerConfig(
   if (hybridWeight.warning) configWarnings.push(hybridWeight.warning)
   if (chunkMinLength.value !== undefined) config.chunkMinLength = chunkMinLength.value
   if (chunkMinLength.warning) configWarnings.push(chunkMinLength.warning)
+
+  // Embedding backend configuration
+  if (embeddingBackend.value !== undefined) {
+    config.embeddingBackend = embeddingBackend.value
+  }
+  if (llamaCppServerUrl.value !== undefined) {
+    if (!config.llamaCppConfig) config.llamaCppConfig = {}
+    config.llamaCppConfig.serverUrl = llamaCppServerUrl.value
+  }
+  if (llamaCppBatchSize.value !== undefined) {
+    if (!config.llamaCppConfig) config.llamaCppConfig = {}
+    config.llamaCppConfig.batchSize = llamaCppBatchSize.value
+  }
+  if (llamaCppTimeout.value !== undefined) {
+    if (!config.llamaCppConfig) config.llamaCppConfig = {}
+    config.llamaCppConfig.timeout = llamaCppTimeout.value
+  }
 
   // Set dtype only when defined, so config.dtype === undefined keeps meaning
   // "RAG_DTYPE unset" (the embedder then applies its fp32 default).
