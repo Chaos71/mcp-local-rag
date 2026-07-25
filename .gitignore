@@ -21,7 +21,7 @@ dist/
 # Runtime data
 coverage
 test-output.json
-lancedb/
+lancedb*/
 models/
 
 # IDE and editor specific files

@@ -65,6 +65,11 @@ export class LlamaCppEmbedder implements IEmbedder {
   private readonly dimensions: number
 
   /**
+   * Model name for the OpenAI-compatible API.
+   */
+  private readonly modelName: string
+
+  /**
    * Create a new LlamaCppEmbedder instance.
    *
    * @param config - Configuration for the llama.cpp backend
@@ -78,7 +83,10 @@ export class LlamaCppEmbedder implements IEmbedder {
       serverUrl: config.serverUrl ?? LLAMA_CPP_DEFAULTS.serverUrl,
       batchSize: config.batchSize ?? LLAMA_CPP_DEFAULTS.batchSize,
       timeout: config.timeout ?? LLAMA_CPP_DEFAULTS.timeout,
+      model: config.model ?? LLAMA_CPP_DEFAULTS.model,
     }
+
+    this.modelName = this.config.model
 
     // Default dimensionality for Qwen3-Embedding-4B.
     // Users can override by setting RAG_LLAMA_CPP_DIMENSIONS env var if needed.
@@ -126,6 +134,8 @@ export class LlamaCppEmbedder implements IEmbedder {
   /**
    * Generate embedding vector for a single text.
    *
+   * Uses the OpenAI-compatible /v1/embeddings endpoint provided by llama.cpp.
+   *
    * @param text - Text to embed
    * @returns Embedding vector
    */
@@ -134,13 +144,13 @@ export class LlamaCppEmbedder implements IEmbedder {
       throw new EmbeddingError('Cannot generate embedding for empty text')
     }
 
-    const requestBody: LlamaCppEmbedRequest = { input: text }
+    const requestBody: LlamaCppEmbedRequest = { model: this.modelName, input: text }
 
     try {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), this.config.timeout)
 
-      const response = await fetch(`${this.config.serverUrl}/embed`, {
+      const response = await fetch(`${this.config.serverUrl}/v1/embeddings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
@@ -156,13 +166,26 @@ export class LlamaCppEmbedder implements IEmbedder {
 
       const data: LlamaCppEmbedResponse = await response.json()
 
-      if (!data.embedding || !Array.isArray(data.embedding)) {
+      // OpenAI-compatible response: embeddings are in data[0].embedding
+      if (!data.data || !Array.isArray(data.data) || data.data.length === 0) {
         throw new LlamaCppError(
-          'Invalid response format from llama.cpp server: missing or invalid "embedding" field'
+          'Invalid response format from llama.cpp server: missing or invalid "data" field'
         )
       }
 
-      return data.embedding
+      const embeddingData = data.data[0]
+      if (!embeddingData) {
+        throw new LlamaCppError(
+          'Invalid response format from llama.cpp server: data[0] is undefined'
+        )
+      }
+      if (!embeddingData.embedding || !Array.isArray(embeddingData.embedding)) {
+        throw new LlamaCppError(
+          'Invalid response format from llama.cpp server: missing or invalid "embedding" field in data[0]'
+        )
+      }
+
+      return embeddingData.embedding
     } catch (error) {
       if (error instanceof LlamaCppError) {
         throw error

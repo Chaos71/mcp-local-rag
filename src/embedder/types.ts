@@ -31,6 +31,13 @@ export interface LlamaCppConfig {
    * Default: 30000
    */
   timeout?: number
+
+  /**
+   * Model name to use for embeddings (OpenAI-compatible API).
+   * This should match the model loaded on the llama.cpp server.
+   * Default: `nomic-embed-text`
+   */
+  model?: string
 }
 
 /**
@@ -40,22 +47,39 @@ export const LLAMA_CPP_DEFAULTS = {
   serverUrl: 'http://127.0.0.1:8080',
   batchSize: 16,
   timeout: 30000,
+  model: 'nomic-embed-text',
 } as const
 
 /**
- * HTTP response from llama.cpp /embed endpoint.
+ * OpenAI-compatible embedding response from llama.cpp /v1/embeddings endpoint.
  */
 export interface LlamaCppEmbedResponse {
-  /** Embedding vector */
-  embedding: number[]
-  /** Model name (optional, for informational purposes) */
-  model?: string
+  /** Array of embedding objects (typically one per input) */
+  data: Array<{
+    /** Embedding vector */
+    embedding: number[]
+    /** Object type (always "embedding") */
+    object: string
+    /** Index in the input array */
+    index: number
+  }>
+  /** Model name that generated the embeddings */
+  model: string
+  /** Usage statistics */
+  usage: {
+    /** Number of tokens in the prompt */
+    prompt_tokens: number
+    /** Total number of tokens */
+    total_tokens: number
+  }
 }
 
 /**
- * HTTP request body for llama.cpp /embed endpoint.
+ * OpenAI-compatible embedding request body for llama.cpp /v1/embeddings endpoint.
  */
 export interface LlamaCppEmbedRequest {
-  /** Text to embed */
-  input: string
+  /** Model name to use for embeddings */
+  model: string
+  /** Text or array of texts to embed */
+  input: string | string[]
 }

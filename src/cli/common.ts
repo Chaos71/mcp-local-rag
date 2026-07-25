@@ -1,7 +1,10 @@
 // Shared CLI component helpers — factory functions for VectorStore and Embedder
 // plus base-directory resolution shared by every subcommand that scans files.
 
-import { Embedder } from '../embedder/index.js'
+import { createEmbedder as createEmbedderFactory } from '../embedder/factory.js'
+import type { EmbedderConfig, IEmbedder } from '../embedder/index.js'
+import { LlamaCppEmbedder } from '../embedder/llama-cpp.js'
+import type { EmbeddingBackend, LlamaCppConfig } from '../embedder/types.js'
 import {
   type BaseDirsConfig,
   type BaseDirsConfigWarning,
@@ -50,9 +53,34 @@ export function createVectorStore(config: ResolvedGlobalConfig): VectorStore {
 /**
  * Create an uninitialized Embedder from resolved global config.
  * Callers are responsible for managing the Embedder lifecycle.
+ *
+ * Uses the factory to select the correct backend (Transformers.js or llama.cpp)
+ * based on the `embeddingBackend` configuration.
  */
-export function createEmbedder(config: ResolvedGlobalConfig): Embedder {
-  const embedderConfig: ConstructorParameters<typeof Embedder>[0] = {
+export function createEmbedder(config: ResolvedGlobalConfig): IEmbedder {
+  if (config.embeddingBackend === 'llama-cpp') {
+    // llama.cpp backend — use the HTTP server
+    // Strip trailing slash from server URL to avoid double slashes in endpoints
+    const rawServerUrl = process.env['LLAMA_CPP_SERVER_URL'] ?? 'http://127.0.0.1:8080'
+    const serverUrl = rawServerUrl.replace(/\/+$/, '')
+
+    // Model name: CLI flag > env var > default
+    const llamaCppModel = config.llamaCppModel ?? process.env['LLAMA_CPP_MODEL']
+
+    const llamaCppConfig: LlamaCppConfig = {
+      serverUrl,
+      batchSize: parseInt(process.env['LLAMA_CPP_BATCH_SIZE'] ?? '16', 10) || 16,
+      timeout: parseInt(process.env['LLAMA_CPP_TIMEOUT'] ?? '30000', 10) || 30000,
+    }
+    // Only set model when defined (exactOptionalPropertyTypes compliance)
+    if (llamaCppModel !== undefined) {
+      llamaCppConfig.model = llamaCppModel
+    }
+    return new LlamaCppEmbedder(llamaCppConfig)
+  }
+
+  // Transformers.js backend (default)
+  const transformersConfig: EmbedderConfig = {
     modelPath: config.modelName,
     batchSize: 16,
     cacheDir: config.cacheDir,
@@ -63,9 +91,12 @@ export function createEmbedder(config: ResolvedGlobalConfig): Embedder {
   // embedder applies its fp32 default.
   const dtype = resolveDtype(process.env['RAG_DTYPE'])
   if (dtype !== undefined) {
-    embedderConfig.dtype = dtype
+    transformersConfig.dtype = dtype
   }
-  return new Embedder(embedderConfig)
+  return createEmbedderFactory({
+    backend: 'transformers' as EmbeddingBackend,
+    transformersConfig,
+  })
 }
 
 /**

@@ -138,6 +138,18 @@ export function parseLlamaCppTimeout(value: string | undefined): ParseResult<num
   return { value: parsed }
 }
 
+/**
+ * Parse llama.cpp model name from environment variable
+ */
+export function parseLlamaCppModel(value: string | undefined): ParseResult<string> {
+  if (!value) return { value: undefined }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return { value: undefined }
+  }
+  return { value: trimmed }
+}
+
 // ============================================
 // Server Startup
 // ============================================
@@ -166,10 +178,12 @@ export async function resolveServerConfig(
   const llamaCppServerUrl = parseLlamaCppServerUrl(env['LLAMA_CPP_SERVER_URL'])
   const llamaCppBatchSize = parseLlamaCppBatchSize(env['LLAMA_CPP_BATCH_SIZE'])
   const llamaCppTimeout = parseLlamaCppTimeout(env['LLAMA_CPP_TIMEOUT'])
+  const llamaCppModel = parseLlamaCppModel(env['LLAMA_CPP_MODEL'])
   if (embeddingBackend.warning) configWarnings.push(embeddingBackend.warning)
   if (llamaCppServerUrl.warning) configWarnings.push(llamaCppServerUrl.warning)
   if (llamaCppBatchSize.warning) configWarnings.push(llamaCppBatchSize.warning)
   if (llamaCppTimeout.warning) configWarnings.push(llamaCppTimeout.warning)
+  if (llamaCppModel.warning) configWarnings.push(llamaCppModel.warning)
 
   // Sensitive-path pre-check on the RAW user-supplied paths, before the
   // resolver realpath-normalizes them (on macOS `/etc` → `/private/etc`, which
@@ -274,6 +288,10 @@ export async function resolveServerConfig(
   if (llamaCppTimeout.value !== undefined) {
     if (!config.llamaCppConfig) config.llamaCppConfig = {}
     config.llamaCppConfig.timeout = llamaCppTimeout.value
+  }
+  if (llamaCppModel.value !== undefined) {
+    if (!config.llamaCppConfig) config.llamaCppConfig = {}
+    config.llamaCppConfig.model = llamaCppModel.value
   }
 
   // Set dtype only when defined, so config.dtype === undefined keeps meaning
