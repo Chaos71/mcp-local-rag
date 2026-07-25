@@ -1,6 +1,6 @@
 ---
 name: mcp-local-rag
-version: 0.16.1
+version: 0.17.0
 status: active
 description: Локальный RAG-сервер для семантического поиска по документам
 ---
@@ -40,7 +40,7 @@ npx mcp-local-rag query "authentication API"
 | Тестирование | Vitest 4.1 |
 | Форматирование | Biome 2.5 |
 | Векторная БД | LanceDB (file-based) |
-| Эмбеддинги | Transformers.js (HuggingFace) |
+| Эмбеддинги | Transformers.js (HuggingFace) / llama.cpp |
 | Парсинг PDF | mupdf |
 | Парсинг DOCX | mammoth |
 | HTML→Markdown | turndown + Readability |
@@ -104,6 +104,12 @@ npx mcp-local-rag query "authentication API"
 | `DB_PATH` | `./lancedb/` | Путь к векторной БД |
 | `CACHE_DIR` | `./models/` | Директория кэша моделей |
 | `MODEL_NAME` | `Xenova/all-MiniLM-L6-v2` | HuggingFace модель |
+| `EMBEDDING_BACKEND` | `transformers` | Бэкенд эмбеддингов: `transformers` или `llama-cpp` |
+| `LLAMA_CPP_SERVER_URL` | `http://127.0.0.1:8080` | URL сервера llama.cpp |
+| `LLAMA_CPP_MODEL` | `nomic-embed-text` | Модель для OpenAI-compatible API |
+| `LLAMA_CPP_BATCH_SIZE` | `16` | Размер батча (1–128) |
+| `LLAMA_CPP_TIMEOUT` | `30000` | Таймаут запроса (мс) |
+| `RAG_LLAMA_CPP_DIMENSIONS` | `4096` | Размерность эмбеддингов llama.cpp (переопределение) |
 | `MAX_FILE_SIZE` | 100MB | Максимальный размер файла |
 | `CHUNK_MIN_LENGTH` | 50 | Минимальная длина чанка |
 | `RAG_DEVICE` | `cpu` | Устройство выполнения |
@@ -126,7 +132,11 @@ src/
 ├── server/               # MCP обработчики инструментов
 ├── parser/               # Парсинг документов
 ├── chunker/              # Семантическое чанкирование
-├── embedder/             # Transformers.js эмбеддинги
+├── embedder/             # Эмбеддинги (Transformers.js + llama.cpp)
+│   ├── index.ts          # Интерфейс IEmbedder, Transformers.js бэкенд
+│   ├── llama-cpp.ts      # llama.cpp HTTP-бэкенд
+│   ├── factory.ts        # Фабрика createEmbedder()
+│   └── types.ts          # Общие типы
 ├── vectordb/             # LanceDB операции
 ├── features/             # Feature flags
 ├── pdf-visual/           # Визуальный режим для PDF
@@ -222,6 +232,17 @@ pnpm run check:fix         # Автофикс lint/format
 3. Просит ассистента: "Найди информацию об аутентификации в документации"
 4. Ассистент использует MCP инструменты для поиска
 
+### S-004: Использование локальной LLM через llama.cpp
+1. Пользователь скачивает GGUF-модель (например, Qwen3-Embedding-4B.gguf)
+2. Запускает сервер llama.cpp: `llama-server --model ./models/Qwen3-Embedding-4B.gguf --port 8080 --embedding`
+3. Настраивает переменные окружения:
+   ```bash
+   export EMBEDDING_BACKEND=llama-cpp
+   export LLAMA_CPP_SERVER_URL=http://127.0.0.1:8080
+   ```
+4. Запускает mcp-local-rag как обычно
+5. Все эмбеддинги генерируются через локальную LLM
+
 ## Классы и публичные методы
 
 ### Диаграмма классов
@@ -232,7 +253,7 @@ pnpm run check:fix         # Автофикс lint/format
 ├─────────────────────────────────────────────────────────────────────────┤
 │ - server: Server (MCP)                                                   │
 │ - vectorStore: VectorStore                                               │
-│ - embedder: Embedder                                                     │
+│ - embedder: IEmbedder (Embedder | LlamaCppEmbedder)                      │
 │ - chunker: SemanticChunker                                               │
 │ - parser: DocumentParser                                                 │
 │ - baseDirs: string[]                                                     │
@@ -252,7 +273,7 @@ pnpm run check:fix         # Автофикс lint/format
                                     │
                                     ▼
 ┌─────────────────────┐   ┌─────────────────────┐   ┌─────────────────────┐
-│    VectorStore      │   │      Embedder       │   │  SemanticChunker    │
+│    VectorStore      │   │    IEmbedder        │   │  SemanticChunker    │
 ├─────────────────────┤   ├─────────────────────┤   ├─────────────────────┤
 │ - db: Connection    │   │ - model: unknown    │   │ - config: Config    │
 │ - table: Table      │   │ - initPromise       │   │                     │
@@ -301,12 +322,20 @@ pnpm run check:fix         # Автофикс lint/format
 - **Особенности:** Поддержка транзакций (backup/rollback при реингесте), гибридный поиск
 - **Схема:** filePath, chunkIndex, text, embedding (вектор), timestamp, fileSize, fileTitle
 
-#### Embedder
+#### Embedder (Transformers.js)
 Генерация эмбеддингов через Transformers.js.
 - **Ответственность:** Создание векторных представлений текста
 - **Модель:** Настраивается через `MODEL_NAME` (по умолчанию `Xenova/all-MiniLM-L6-v2`)
 - **Особенности:** Lazy initialization, batch processing (batchSize=16), поддержка quantization (fp32, fp16, q8, int8)
 - **Устройства:** CPU (по умолчанию), WebGPU (опционально)
+
+#### LlamaCppEmbedder (llama.cpp)
+Генерация эмбеддингов через локальный сервер llama.cpp.
+- **Ответственность:** Создание векторных представлений через HTTP API
+- **API:** OpenAI-compatible `/v1/embeddings` endpoint
+- **Модель:** Настраивается при запуске llama-server вручную (GGUF формат)
+- **Особенности:** Последовательная обработка батчей, health check сервера, обработка таймаутов
+- **Поддерживаемые модели:** Qwen/Qwen3-Embedding-4B (4096), nomic-ai/nomic-embed-text-v1.5 (768)
 
 #### SemanticChunker
 Семантическое разбиение текста на чанки.
@@ -485,6 +514,42 @@ interface StatusResult {
 
 ## LLM и модели
 
+### Локальные LLM через llama.cpp
+
+**Архитектура:**
+Сервер llama.cpp запускается **вручную** как отдельный процесс:
+```bash
+llama-server --model ./models/Qwen3-Embedding-4B.gguf --port 8080 --embedding
+```
+
+**Поток данных:**
+```
+Пользователь (EMBEDDING_BACKEND=llama-cpp)
+    ↓
+createEmbedder() (фабрика)
+    ↓
+LlamaCppEmbedder
+    ↓
+HTTP POST → llama-server (локальный процесс)
+    ↓
+/v1/embeddings (OpenAI-compatible API)
+    ↓
+number[] (эмбеддинг)
+```
+
+**Поддерживаемые модели:**
+
+| Модель | Размерность | Размер |
+|--------|-------------|--------|
+| Qwen/Qwen3-Embedding-4B | 4096 | ~2.9 GB |
+| nomic-ai/nomic-embed-text-v1.5 | 768 | ~1.5 GB |
+
+**Не-цели:**
+- Поддержка GPU через CUDA в llama.cpp (на первое время только CPU)
+- Автоматическая загрузка моделей
+- Поддержка других форматов кроме GGUF
+- Асинхронная обработка батчей (llama.cpp не поддерживает batched inference via HTTP)
+
 ### Эмбеддинги (основная функция)
 
 | Модель | Размер | Размерность | Описание |
@@ -589,17 +654,35 @@ npx mcp-local-rag delete ./docs/manual.pdf
 ```typescript
 import { RAGServer } from 'mcp-local-rag/dist/server/index.js'
 import { VectorStore } from 'mcp-local-rag/dist/vectordb/index.js'
-import { Embedder } from 'mcp-local-rag/dist/embedder/index.js'
+import { Embedder, LlamaCppEmbedder, createEmbedder } from 'mcp-local-rag/dist/embedder/index.js'
 import { SemanticChunker } from 'mcp-local-rag/dist/chunker/index.js'
 import { DocumentParser } from 'mcp-local-rag/dist/parser/index.js'
 ```
 
-**Пример использования:**
+**Пример использования (Transformers.js):**
 ```typescript
 const server = new RAGServer({
   dbPath: './lancedb/',
   modelName: 'Xenova/all-MiniLM-L6-v2',
   cacheDir: './models/',
+  baseDirs: ['./docs/'],
+  maxFileSize: 100 * 1024 * 1024,
+});
+
+await server.initialize();
+await server.run();
+```
+
+**Пример использования (llama.cpp):**
+```typescript
+const server = new RAGServer({
+  dbPath: './lancedb/',
+  embeddingBackend: 'llama-cpp',
+  llamaCppConfig: {
+    serverUrl: 'http://127.0.0.1:8080',
+    batchSize: 16,
+    timeout: 30000,
+  },
   baseDirs: ['./docs/'],
   maxFileSize: 100 * 1024 * 1024,
 });
