@@ -3,7 +3,7 @@
 import type { EmbeddingBackend, LlamaCppConfig } from '../embedder/types.js'
 import type { BaseDirsConfigError } from '../utils/base-dirs.js'
 import type { ContentFormat } from '../utils/raw-data-utils.js'
-import type { GroupingMode } from '../vectordb/index.js'
+import type { GroupingMode, PostgreSQLConfig } from '../vectordb/types.js'
 
 /**
  * Fields shared by both `RAGServerConfig` shapes (legacy single-root and
@@ -63,6 +63,30 @@ interface RAGServerConfigBase {
    * Required when `embeddingBackend` is `llama-cpp`.
    */
   llamaCppConfig?: LlamaCppConfig
+  /**
+   * Vector database backend.
+   * - `lancedb`: LanceDB file-based database (default)
+   * - `postgresql`: PostgreSQL with pgvector extension
+   * Default: `lancedb`
+   */
+  vectordbBackend?: 'lancedb' | 'postgresql'
+  /**
+   * Configuration for PostgreSQL vector database backend.
+   * Required when `vectordbBackend` is `postgresql`.
+   */
+  pgConfig?: PostgreSQLConfig
+  /**
+   * Embedding dimension for PostgreSQL vector storage.
+   * 384 for all-MiniLM-L6-v2, 4096 for Qwen3-Embedding-4B, 768 for nomic-embed-text.
+   * Only relevant when vectordbBackend is `postgresql`.
+   */
+  embeddingDimension?: number
+  /**
+   * IVFFlat index lists count for PostgreSQL pgvector.
+   * Higher values = slower build, faster query. Default: 100.
+   * Only relevant when vectordbBackend is `postgresql`.
+   */
+  ivfLists?: number
 }
 
 /**

@@ -2,6 +2,7 @@
 
 import { type Connection, connect, Index, type Table } from '@lancedb/lancedb'
 import { normalizeScopePrefix } from '../utils/scope-match.js'
+import { PostgreSQLVectordb } from './postgresql.js'
 import { applyFileFilter, applyGrouping, applyKeywordBoost } from './search-filters.js'
 import {
   type ChunkRow,
@@ -10,6 +11,7 @@ import {
   FTS_CLEANUP_THRESHOLD_MS,
   FTS_INDEX_NAME,
   HYBRID_SEARCH_CANDIDATE_MULTIPLIER,
+  type IVectordb,
   type SearchOptions,
   type SearchResult,
   toChunkRow,
@@ -21,6 +23,7 @@ import {
 
 // Re-export public API
 export type { GroupingMode, SearchResult, VectorChunk } from './types.js'
+export { type IVectordb, PostgreSQLVectordb }
 
 // ============================================
 // VectorStore Class
@@ -34,13 +37,13 @@ export type { GroupingMode, SearchResult, VectorChunk } from './types.js'
  * - Transaction handling (atomicity of delete→insert)
  * - Metadata management
  */
-export class VectorStore {
+export class VectorStore implements IVectordb {
   private db: Connection | null = null
   private table: Table | null = null
-  private readonly config: VectorStoreConfig
+  private readonly config: VectorStoreConfig & { backend: 'lancedb' }
   private ftsEnabled = false
 
-  constructor(config: VectorStoreConfig) {
+  constructor(config: VectorStoreConfig & { backend: 'lancedb' }) {
     this.config = config
   }
 
@@ -519,6 +522,7 @@ export class VectorStore {
     uptime: number
     ftsIndexEnabled: boolean
     searchMode: 'hybrid' | 'vector-only'
+    backend: 'lancedb'
   }> {
     if (!this.table) {
       return {
@@ -528,6 +532,7 @@ export class VectorStore {
         uptime: process.uptime(),
         ftsIndexEnabled: false,
         searchMode: 'vector-only',
+        backend: 'lancedb',
       }
     }
 
@@ -562,6 +567,7 @@ export class VectorStore {
           this.ftsEnabled && (this.config.hybridWeight ?? DEFAULT_HYBRID_WEIGHT) > 0
             ? 'hybrid'
             : 'vector-only',
+        backend: 'lancedb',
       }
     } catch (error) {
       throw new DatabaseError('Failed to get status', error as Error)
@@ -581,4 +587,26 @@ export class VectorStore {
       console.error('VectorStore connection closed')
     }
   }
+}
+
+// ============================================
+// Factory Function
+// ============================================
+
+/**
+ * Factory function to create a vector database instance based on configuration.
+ *
+ * Selects the appropriate backend (LanceDB or PostgreSQL) based on the
+ * `backend` discriminator in the config. The caller is responsible for
+ * calling `initialize()` on the returned instance before use.
+ *
+ * @param config — Unified vector store configuration with backend discriminator
+ * @returns A new VectorStore (LanceDB) or PostgreSQLVectordb instance
+ */
+export function createVectordb(config: VectorStoreConfig): IVectordb {
+  if (config.backend === 'postgresql') {
+    return new PostgreSQLVectordb(config as NonNullable<typeof config> & { backend: 'postgresql' })
+  }
+  // Default to LanceDB (backward compatible)
+  return new VectorStore(config as VectorStoreConfig & { backend: 'lancedb' })
 }

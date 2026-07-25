@@ -104,6 +104,18 @@ src/
 | `LLAMA_CPP_BATCH_SIZE` | `16` | Размер батча для llama.cpp (1–128) |
 | `LLAMA_CPP_TIMEOUT` | `30000` | Таймаут запроса llama.cpp (мс) |
 | `RAG_LLAMA_CPP_DIMENSIONS` | `4096` | Размерность эмбеддингов llama.cpp (переопределение) |
+| `VECTORDB_BACKEND` | `lancedb` | Бэкенд векторной БД: `lancedb` или `postgresql` |
+| `PG_HOST` | `localhost` | Хост PostgreSQL-сервера |
+| `PG_PORT` | `5432` | Порт PostgreSQL |
+| `PG_DATABASE` | (not set) | Имя базы данных PostgreSQL |
+| `PG_USER` | (not set) | Пользователь PostgreSQL |
+| `PG_PASSWORD` | (not set) | Пароль PostgreSQL |
+| `PG_SSL_MODE` | `disable` | Режим SSL: disable, allow, prefer, require, verify-ca, verify-full |
+| `PG_MAX_POOL_SIZE` | `20` | Максимальный размер пула соединений |
+| `PG_MIN_POOL_SIZE` | `0` | Минимальный размер пула соединений |
+| `PG_SCHEMA` | `public` | Схема PostgreSQL (для мульти-тенантных сценариев) |
+| `RAG_EMBEDDING_DIMENSIONS` | `384` | Размерность эмбеддингов для pgvector |
+| `RAG_IVF_LISTS` | `100` | Количество списков IVFFlat индекса |
 
 ### Локальные LLM через llama.cpp
 
@@ -125,6 +137,63 @@ src/
 **Поддерживаемые модели:**
 - **Qwen/Qwen3-Embedding-4B** — 4096 размерность, современная модель от Alibaba
 - **nomic-ai/nomic-embed-text-v1.5** — 768 размерность, качественная модель с хорошей семантикой
+
+### PostgreSQL как бэкенд векторной БД
+
+Для корпоративных сценариев (распределённое хранение, репликация, SQL-фильтрация) доступен PostgreSQL-бэкенд с pgvector extension.
+
+**Требования:**
+- PostgreSQL 14+ с установленным расширением `pgvector`
+- ```sql
+  CREATE EXTENSION vector;
+  ```
+
+**Настройка через переменные окружения:**
+```bash
+# Выбрать PostgreSQL-бэкенд
+export VECTORDB_BACKEND=postgresql
+
+# Обязательные параметры подключения
+export PG_HOST=localhost
+export PG_PORT=5432
+export PG_DATABASE=mcp_local_rag
+export PG_USER=postgres
+export PG_PASSWORD=postgres
+
+# Опциональные параметры
+export PG_SSL_MODE=disable
+export PG_MAX_POOL_SIZE=20
+export PG_MIN_POOL_SIZE=0
+
+# Размерность эмбеддингов (по умолчанию 384 для all-MiniLM-L6-v2)
+export RAG_EMBEDDING_DIMENSIONS=384
+
+# Количество списков IVFFlat индекса (по умолчанию 100)
+export RAG_IVF_LISTS=100
+
+# Схема PostgreSQL (по умолчанию public)
+# Используйте для мульти-тенантных сценариев, когда таблицы разнесены по схемам
+export PG_SCHEMA=mytenant
+```
+
+**Мульти-тенантные сценарии:**
+
+Параметр `PG_SCHEMA` позволяет изолировать таблицы разных клиентов в одном экземпляре PostgreSQL без создания отдельных баз данных. Все SQL-запросы квалифицируются схемой (например, `myschema.chunks`).
+
+При первом подключении схема автоматически создаётся через `CREATE SCHEMA IF NOT EXISTS`.
+
+**Сравнение бэкендов:**
+
+| Характеристика | LanceDB | PostgreSQL |
+|----------------|---------|------------|
+| Хранение | File-based (локально) | Серверная БД |
+| Масштабирование | Single-node | Репликация, кластеры |
+| Транзакции | Нет | Полная поддержка |
+| Пул соединений | Нет | Встроенный |
+| SQL-фильтрация | Нет | Полная поддержка |
+| Зависимости | ~10 MB (@lancedb/lancedb) | ~100 KB (pg) |
+| pgvector индекс | IVFFlat/HNSW | IVFFlat/HNSW |
+| Keyword boost | FTS (ngram) | pg_trgm |
 
 ### Приоритет конфигурации
 1. CLI флаги

@@ -151,6 +151,168 @@ export function parseLlamaCppModel(value: string | undefined): ParseResult<strin
 }
 
 // ============================================
+// VectorDB Backend Parsers
+// ============================================
+
+/**
+ * Parse vector database backend from environment variable
+ */
+export function parseVectorDbBackend(
+  value: string | undefined
+): ParseResult<'lancedb' | 'postgresql'> {
+  if (!value) return { value: 'lancedb' }
+  const normalized = value.toLowerCase().trim()
+  if (normalized === 'lancedb' || normalized === 'postgresql') {
+    return { value: normalized }
+  }
+  const warning = `Invalid VECTORDB_BACKEND value: "${value.slice(0, 100)}". Expected "lancedb" or "postgresql". Using default (lancedb).`
+  return { value: 'lancedb', warning }
+}
+
+/**
+ * Parse PostgreSQL host from environment variable
+ */
+export function parsePgHost(value: string | undefined): ParseResult<string> {
+  if (!value) return { value: undefined }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return { value: undefined }
+  }
+  return { value: trimmed }
+}
+
+/**
+ * Parse PostgreSQL port from environment variable
+ */
+export function parsePgPort(value: string | undefined): ParseResult<number> {
+  if (!value) return { value: undefined }
+  const parsed = Number.parseInt(value, 10)
+  if (Number.isNaN(parsed) || parsed < 1 || parsed > 65535) {
+    const warning = `Invalid PG_PORT value: "${value.slice(0, 100)}". Expected integer between 1 and 65535. Ignoring.`
+    return { value: undefined, warning }
+  }
+  return { value: parsed }
+}
+
+/**
+ * Parse PostgreSQL database name from environment variable
+ */
+export function parsePgDatabase(value: string | undefined): ParseResult<string> {
+  if (!value) return { value: undefined }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return { value: undefined }
+  }
+  return { value: trimmed }
+}
+
+/**
+ * Parse PostgreSQL user from environment variable
+ */
+export function parsePgUser(value: string | undefined): ParseResult<string> {
+  if (!value) return { value: undefined }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return { value: undefined }
+  }
+  return { value: trimmed }
+}
+
+/**
+ * Parse PostgreSQL password from environment variable
+ */
+export function parsePgPassword(value: string | undefined): ParseResult<string> {
+  if (!value) return { value: undefined }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return { value: undefined }
+  }
+  return { value: trimmed }
+}
+
+/**
+ * Parse PostgreSQL SSL mode from environment variable
+ */
+export function parsePgSslMode(
+  value: string | undefined
+): ParseResult<'disable' | 'allow' | 'prefer' | 'require' | 'verify-ca' | 'verify-full'> {
+  if (!value) return { value: 'disable' }
+  const normalized = value.toLowerCase().trim()
+  const validModes = ['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full']
+  if (validModes.includes(normalized)) {
+    return {
+      value: normalized as 'disable' | 'allow' | 'prefer' | 'require' | 'verify-ca' | 'verify-full',
+    }
+  }
+  const warning = `Invalid PG_SSL_MODE value: "${value.slice(0, 100)}". Expected one of: ${validModes.join(', ')}. Using default (disable).`
+  return { value: 'disable', warning }
+}
+
+/**
+ * Parse PostgreSQL max pool size from environment variable
+ */
+export function parsePgMaxPoolSize(value: string | undefined): ParseResult<number> {
+  if (!value) return { value: undefined }
+  const parsed = Number.parseInt(value, 10)
+  if (Number.isNaN(parsed) || parsed < 1 || parsed > 100) {
+    const warning = `Invalid PG_MAX_POOL_SIZE value: "${value.slice(0, 100)}". Expected integer between 1 and 100. Ignoring.`
+    return { value: undefined, warning }
+  }
+  return { value: parsed }
+}
+
+/**
+ * Parse PostgreSQL min pool size from environment variable
+ */
+export function parsePgMinPoolSize(value: string | undefined): ParseResult<number> {
+  if (!value) return { value: undefined }
+  const parsed = Number.parseInt(value, 10)
+  if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
+    const warning = `Invalid PG_MIN_POOL_SIZE value: "${value.slice(0, 100)}". Expected integer between 0 and 100. Ignoring.`
+    return { value: undefined, warning }
+  }
+  return { value: parsed }
+}
+
+/**
+ * Parse PostgreSQL schema from environment variable
+ */
+export function parsePgSchema(value: string | undefined): ParseResult<string> {
+  if (!value) return { value: undefined }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return { value: undefined }
+  }
+  return { value: trimmed }
+}
+
+/**
+ * Parse embedding dimension from environment variable
+ */
+export function parseEmbeddingDimension(value: string | undefined): ParseResult<number> {
+  if (!value) return { value: undefined }
+  const parsed = Number.parseInt(value, 10)
+  if (Number.isNaN(parsed) || parsed < 1 || parsed > 16384) {
+    const warning = `Invalid RAG_EMBEDDING_DIMENSIONS value: "${value.slice(0, 100)}". Expected integer between 1 and 16384. Ignoring.`
+    return { value: undefined, warning }
+  }
+  return { value: parsed }
+}
+
+/**
+ * Parse IVFFlat index lists count from environment variable
+ */
+export function parseIvfLists(value: string | undefined): ParseResult<number> {
+  if (!value) return { value: undefined }
+  const parsed = Number.parseInt(value, 10)
+  if (Number.isNaN(parsed) || parsed < 1 || parsed > 10000) {
+    const warning = `Invalid RAG_IVF_LISTS value: "${value.slice(0, 100)}". Expected integer between 1 and 10000. Ignoring.`
+    return { value: undefined, warning }
+  }
+  return { value: parsed }
+}
+
+// ============================================
 // Server Startup
 // ============================================
 
@@ -293,6 +455,76 @@ export async function resolveServerConfig(
     if (!config.llamaCppConfig) config.llamaCppConfig = {}
     config.llamaCppConfig.model = llamaCppModel.value
   }
+
+  // Vector database backend configuration
+  const vectordbBackend = parseVectorDbBackend(env['VECTORDB_BACKEND'])
+  if (vectordbBackend.warning) configWarnings.push(vectordbBackend.warning)
+  if (vectordbBackend.value !== undefined) {
+    config.vectordbBackend = vectordbBackend.value
+  }
+
+  // PostgreSQL configuration (only relevant when vectordbBackend is 'postgresql')
+  if (vectordbBackend.value === 'postgresql') {
+    const pgHost = parsePgHost(env['PG_HOST'])
+    const pgPort = parsePgPort(env['PG_PORT'])
+    const pgDatabase = parsePgDatabase(env['PG_DATABASE'])
+    const pgUser = parsePgUser(env['PG_USER'])
+    const pgPassword = parsePgPassword(env['PG_PASSWORD'])
+    const pgSslMode = parsePgSslMode(env['PG_SSL_MODE'])
+    const pgMaxPoolSize = parsePgMaxPoolSize(env['PG_MAX_POOL_SIZE'])
+    const pgMinPoolSize = parsePgMinPoolSize(env['PG_MIN_POOL_SIZE'])
+    const pgSchema = parsePgSchema(env['PG_SCHEMA'])
+
+    if (pgHost.warning) configWarnings.push(pgHost.warning)
+    if (pgPort.warning) configWarnings.push(pgPort.warning)
+    if (pgDatabase.warning) configWarnings.push(pgDatabase.warning)
+    if (pgUser.warning) configWarnings.push(pgUser.warning)
+    if (pgPassword.warning) configWarnings.push(pgPassword.warning)
+    if (pgSslMode.warning) configWarnings.push(pgSslMode.warning)
+    if (pgMaxPoolSize.warning) configWarnings.push(pgMaxPoolSize.warning)
+    if (pgMinPoolSize.warning) configWarnings.push(pgMinPoolSize.warning)
+    if (pgSchema.warning) configWarnings.push(pgSchema.warning)
+
+    // Build pgConfig only if all required fields are present
+    if (pgHost.value && pgDatabase.value && pgUser.value && pgPassword.value) {
+      const pgConfig: NonNullable<typeof config.pgConfig> = {
+        host: pgHost.value,
+        port: pgPort.value ?? 5432,
+        database: pgDatabase.value,
+        user: pgUser.value,
+        password: pgPassword.value,
+      }
+      if (pgSslMode.value !== undefined) pgConfig.sslMode = pgSslMode.value
+      if (pgMaxPoolSize.value !== undefined) pgConfig.maxPoolSize = pgMaxPoolSize.value
+      if (pgMinPoolSize.value !== undefined) pgConfig.minPoolSize = pgMinPoolSize.value
+      if (pgSchema.value !== undefined) pgConfig.schema = pgSchema.value
+      config.pgConfig = pgConfig
+    } else {
+      const missing = []
+      if (!pgHost.value) missing.push('PG_HOST')
+      if (!pgDatabase.value) missing.push('PG_DATABASE')
+      if (!pgUser.value) missing.push('PG_USER')
+      if (!pgPassword.value) missing.push('PG_PASSWORD')
+      configWarnings.push(
+        `PostgreSQL backend selected but missing required fields: ${missing.join(', ')}. Using LanceDB fallback.`
+      )
+      config.vectordbBackend = 'lancedb'
+    }
+  }
+
+  // Embedding dimension (for PostgreSQL pgvector)
+  const embeddingDimension = parseEmbeddingDimension(env['RAG_EMBEDDING_DIMENSIONS'])
+  if (embeddingDimension.value !== undefined) {
+    config.embeddingDimension = embeddingDimension.value
+  }
+  if (embeddingDimension.warning) configWarnings.push(embeddingDimension.warning)
+
+  // IVFFlat index lists count (for PostgreSQL pgvector)
+  const ivfLists = parseIvfLists(env['RAG_IVF_LISTS'])
+  if (ivfLists.value !== undefined) {
+    config.ivfLists = ivfLists.value
+  }
+  if (ivfLists.warning) configWarnings.push(ivfLists.warning)
 
   // Set dtype only when defined, so config.dtype === undefined keeps meaning
   // "RAG_DTYPE unset" (the embedder then applies its fp32 default).

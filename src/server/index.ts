@@ -36,7 +36,7 @@ import {
   saveRawData,
 } from '../utils/raw-data-utils.js'
 import { nonAbsolutePrefixes } from '../utils/scope-match.js'
-import { type VectorChunk, VectorStore } from '../vectordb/index.js'
+import { createVectordb, type IVectordb, type VectorChunk } from '../vectordb/index.js'
 import { DatabaseError } from '../vectordb/types.js'
 import {
   appendConfigWarnings,
@@ -97,7 +97,7 @@ const packageVersion = (createRequire(import.meta.url)('../../package.json') as 
 /** RAG server compliant with MCP Protocol */
 export class RAGServer {
   private readonly server: Server
-  private readonly vectorStore: VectorStore
+  private readonly vectorStore: IVectordb
   private readonly embedder: IEmbedder
   private readonly chunker: SemanticChunker
   private readonly parser: DocumentParser
@@ -158,24 +158,39 @@ export class RAGServer {
     )
 
     // Component initialization
-    // Only pass quality filter settings if they are defined
-    const vectorStoreConfig: ConstructorParameters<typeof VectorStore>[0] = {
-      dbPath: config.dbPath,
-      tableName: 'chunks',
+    // Select vector database backend based on configuration
+    const vectordbBackend = config.vectordbBackend ?? 'lancedb'
+    if (vectordbBackend === 'postgresql' && !config.pgConfig) {
+      throw new Error('pgConfig is required when vectordbBackend is "postgresql"')
     }
-    if (config.maxDistance !== undefined) {
-      vectorStoreConfig.maxDistance = config.maxDistance
-    }
-    if (config.grouping !== undefined) {
-      vectorStoreConfig.grouping = config.grouping
-    }
-    if (config.hybridWeight !== undefined) {
-      vectorStoreConfig.hybridWeight = config.hybridWeight
-    }
-    if (config.maxFiles !== undefined) {
-      vectorStoreConfig.maxFiles = config.maxFiles
-    }
-    this.vectorStore = new VectorStore(vectorStoreConfig)
+
+    // Build unified vector store configuration with backend discriminator
+    const vectorStoreConfig =
+      vectordbBackend === 'postgresql'
+        ? {
+            backend: 'postgresql' as const,
+            pgConfig: config.pgConfig!,
+            tableName: 'chunks',
+            ...(config.maxDistance !== undefined ? { maxDistance: config.maxDistance } : {}),
+            ...(config.grouping !== undefined ? { grouping: config.grouping } : {}),
+            ...(config.hybridWeight !== undefined ? { hybridWeight: config.hybridWeight } : {}),
+            ...(config.maxFiles !== undefined ? { maxFiles: config.maxFiles } : {}),
+            ...(config.embeddingDimension !== undefined
+              ? { embeddingDimension: config.embeddingDimension }
+              : {}),
+            ...(config.ivfLists !== undefined ? { ivfLists: config.ivfLists } : {}),
+          }
+        : {
+            backend: 'lancedb' as const,
+            dbPath: config.dbPath,
+            tableName: 'chunks',
+            ...(config.maxDistance !== undefined ? { maxDistance: config.maxDistance } : {}),
+            ...(config.grouping !== undefined ? { grouping: config.grouping } : {}),
+            ...(config.hybridWeight !== undefined ? { hybridWeight: config.hybridWeight } : {}),
+            ...(config.maxFiles !== undefined ? { maxFiles: config.maxFiles } : {}),
+          }
+
+    this.vectorStore = createVectordb(vectorStoreConfig)
 
     // Create embedder using factory based on selected backend
     const backend = config.embeddingBackend ?? 'transformers'
@@ -330,24 +345,26 @@ export class RAGServer {
     })
 
     // Format results with source restoration for raw-data files
-    const results: QueryResult[] = searchResults.map((result) => {
-      const queryResult: QueryResult = {
-        filePath: result.filePath,
-        chunkIndex: result.chunkIndex,
-        text: result.text,
-        score: result.score,
-        fileTitle: result.fileTitle ?? null,
-      }
-
-      if (isManagedRawDataPath(result.filePath, this.dbPath)) {
-        const source = extractSourceFromPath(result.filePath)
-        if (source) {
-          queryResult.source = source
+    const results: QueryResult[] = searchResults.map(
+      (result: import('../vectordb/types.js').SearchResult) => {
+        const queryResult: QueryResult = {
+          filePath: result.filePath,
+          chunkIndex: result.chunkIndex,
+          text: result.text,
+          score: result.score,
+          fileTitle: result.fileTitle ?? null,
         }
-      }
 
-      return queryResult
-    })
+        if (isManagedRawDataPath(result.filePath, this.dbPath)) {
+          const source = extractSourceFromPath(result.filePath)
+          if (source) {
+            queryResult.source = source
+          }
+        }
+
+        return queryResult
+      }
+    )
 
     const content: RagContentBlock[] = [
       {
@@ -445,7 +462,7 @@ export class RAGServer {
     // existing data untouched — rather than proceeding into the delete with
     // an empty/partial backup.
     backup = await this.vectorStore.getChunksByFilePath(args.filePath)
-    if (backup.length > 0) {
+    if (backup !== null && backup.length > 0) {
       console.error(`Backup created: ${backup.length} chunks for ${args.filePath}`)
     }
 
@@ -833,17 +850,19 @@ export class RAGServer {
     // Post-fetch marking: isTarget per item; source attached for raw-data rows.
     const isRaw = isManagedRawDataPath(targetPath, this.dbPath)
     const sourceForAll = isRaw ? extractSourceFromPath(targetPath) : null
-    const items: ReadChunkNeighborsResultItem[] = rows.map((row) => {
-      const item: ReadChunkNeighborsResultItem = {
-        filePath: row.filePath,
-        chunkIndex: row.chunkIndex,
-        text: row.text,
-        isTarget: row.chunkIndex === args.chunkIndex,
-        fileTitle: row.fileTitle ?? null,
+    const items: ReadChunkNeighborsResultItem[] = rows.map(
+      (row: import('../vectordb/types.js').ChunkRow) => {
+        const item: ReadChunkNeighborsResultItem = {
+          filePath: row.filePath,
+          chunkIndex: row.chunkIndex,
+          text: row.text,
+          isTarget: row.chunkIndex === args.chunkIndex,
+          fileTitle: row.fileTitle ?? null,
+        }
+        if (sourceForAll) item.source = sourceForAll
+        return item
       }
-      if (sourceForAll) item.source = sourceForAll
-      return item
-    })
+    )
 
     return {
       content: this.withWarnings([

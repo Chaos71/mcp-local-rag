@@ -495,6 +495,28 @@ apply the mcp-local-rag skill for better query formulation and result interpreta
 
 ## Configuration
 
+### Automatic .env Loading
+
+mcp-local-rag automatically loads `.env` from the current working directory on every startup. Variables from `.env` are only applied if they are not already set from the external environment (shell, docker-compose, CI/CD).
+
+The `.env` file is automatically added to `.gitignore` on first load.
+
+**Recommended variables** (warnings shown at startup if missing):
+
+| Variable | Description |
+|----------|-------------|
+| `BASE_DIR` | Document root directory |
+| `DB_PATH` | Vector database location |
+| `CACHE_DIR` | Model cache directory |
+| `MODEL_NAME` | HuggingFace model ID |
+| `EMBEDDING_BACKEND` | Embedding backend: `transformers` or `llama-cpp` |
+| `RAG_DEVICE` | Execution device: `cpu` or `webgpu` |
+
+**Disable configuration warnings:**
+```bash
+export RAG_QUIET_CONFIG=1
+```
+
 ### Environment Variables and CLI Flags
 
 The MCP server is configured by environment variables only — pass them through your MCP client's `env` block. The CLI accepts the same env vars plus equivalent flags (priority: CLI flag > env > default). CLI flags are not accepted on the bare `mcp-local-rag` (MCP server) launch.
@@ -586,6 +608,76 @@ For users who want to leverage modern embedding models available only in GGUF fo
 - Requires a separate llama.cpp server process
 - HTTP latency (~5-15ms per request)
 - No automatic model management
+
+### PostgreSQL Vector Database Backend
+
+For enterprise scenarios (distributed storage, replication, SQL filtering), mcp-local-rag supports PostgreSQL as a vector database backend with pgvector extension.
+
+**Requirements:**
+- PostgreSQL 14+ with pgvector extension installed:
+  ```sql
+  CREATE EXTENSION vector;
+  ```
+
+**Configuration:**
+
+**MCP client (Cursor/Codex/Claude Code):**
+```json
+{
+  "mcpServers": {
+    "local-rag": {
+      "command": "npx",
+      "args": ["-y", "mcp-local-rag"],
+      "env": {
+        "BASE_DIR": "/path/to/your/documents",
+        "VECTORDB_BACKEND": "postgresql",
+        "PG_HOST": "localhost",
+        "PG_PORT": "5432",
+        "PG_DATABASE": "mcp_local_rag",
+        "PG_USER": "postgres",
+        "PG_PASSWORD": "postgres",
+        "PG_SSL_MODE": "disable"
+      }
+    }
+  }
+}
+```
+
+**CLI:**
+```bash
+VECTORDB_BACKEND=postgresql PG_HOST=localhost PG_DATABASE=mcp_local_rag \
+  PG_USER=postgres PG_PASSWORD=postgres \
+  npx mcp-local-rag ingest ./docs/
+```
+
+**Configuration options:**
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `VECTORDB_BACKEND` | `lancedb` | Vector DB backend: `lancedb` or `postgresql` |
+| `PG_HOST` | `localhost` | PostgreSQL server host |
+| `PG_PORT` | `5432` | PostgreSQL port |
+| `PG_DATABASE` | (required) | Database name |
+| `PG_USER` | (required) | Database user |
+| `PG_PASSWORD` | (required) | Database password |
+| `PG_SSL_MODE` | `disable` | SSL mode: disable, allow, prefer, require, verify-ca, verify-full |
+| `PG_MAX_POOL_SIZE` | `20` | Maximum connection pool size (1–100) |
+| `PG_MIN_POOL_SIZE` | `0` | Minimum connection pool size (0–100) |
+| `RAG_EMBEDDING_DIMENSIONS` | `384` | Embedding dimension for pgvector (384 for all-MiniLM-L6-v2, 4096 for Qwen3-Embedding-4B) |
+| `RAG_IVF_LISTS` | `100` | IVFFlat index lists count (1–10000) |
+
+**Backend comparison:**
+
+| Feature | LanceDB | PostgreSQL |
+|---------|---------|------------|
+| Storage | File-based (local) | Server database |
+| Scaling | Single-node | Replication, clusters |
+| Transactions | None | Full support |
+| Connection pooling | None | Built-in |
+| SQL filtering | None | Full support |
+| Dependencies | ~10 MB (@lancedb/lancedb) | ~100 KB (pg) |
+| pgvector index | IVFFlat/HNSW | IVFFlat/HNSW |
+| Keyword boost | FTS (ngram) | pg_trgm |
 
 ### Document Roots (`BASE_DIR` and `BASE_DIRS`)
 

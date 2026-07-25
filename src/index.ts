@@ -3,6 +3,12 @@
 // Entry point for mcp-local-rag
 // Routes to CLI subcommands or starts the MCP server
 
+// Загрузить .env файл и проверить конфигурацию до роутинга
+import { checkRecommendedConfig, loadEnv } from './env/index.js'
+
+loadEnv({ debug: false })
+checkRecommendedConfig()
+
 import { parseGlobalOptions } from './cli/options.js'
 import { handleCli, SUBCOMMANDS, type Subcommand } from './cli-main.js'
 import { startServer } from './server-main.js'

@@ -39,7 +39,7 @@ npx mcp-local-rag query "authentication API"
 | Менеджер пакетов | pnpm 11.9.0 |
 | Тестирование | Vitest 4.1 |
 | Форматирование | Biome 2.5 |
-| Векторная БД | LanceDB (file-based) |
+| Векторная БД | LanceDB (file-based) / PostgreSQL + pgvector |
 | Эмбеддинги | Transformers.js (HuggingFace) / llama.cpp |
 | Парсинг PDF | mupdf |
 | Парсинг DOCX | mammoth |
@@ -93,6 +93,48 @@ npx mcp-local-rag query "authentication API"
 - Нет сетевых запросов после загрузки модели
 - pnpm quarantine: 24 часа для новых пакетов
 
+### 5. PostgreSQL как бэкенд векторной БД
+
+Для корпоративных сценариев (распределённое хранение, репликация, SQL-фильтрация) доступен PostgreSQL-бэкенд с pgvector extension.
+
+**Требования:**
+- PostgreSQL 14+ с установленным расширением `pgvector`
+- ```sql
+  CREATE EXTENSION vector;
+  ```
+
+**Переключение бэкенда:**
+```bash
+export VECTORDB_BACKEND=postgresql
+```
+
+**Обязательные параметры подключения:**
+- `PG_HOST` — хост PostgreSQL-сервера
+- `PG_DATABASE` — имя базы данных
+- `PG_USER` — пользователь
+- `PG_PASSWORD` — пароль
+
+**Опциональные параметры:**
+- `PG_PORT` — порт (по умолчанию 5432)
+- `PG_SSL_MODE` — режим SSL (disable, allow, prefer, require, verify-ca, verify-full)
+- `PG_MAX_POOL_SIZE` — максимальный размер пула (по умолчанию 20)
+- `PG_MIN_POOL_SIZE` — минимальный размер пула (по умолчанию 0)
+- `RAG_EMBEDDING_DIMENSIONS` — размерность эмбеддингов (по умолчанию 384)
+- `RAG_IVF_LISTS` — количество списков IVFFlat индекса (по умолчанию 100)
+
+**Сравнение бэкендов:**
+
+| Характеристика | LanceDB | PostgreSQL |
+|----------------|---------|------------|
+| Хранение | File-based (локально) | Серверная БД |
+| Масштабирование | Single-node | Репликация, кластеры |
+| Транзакции | Нет | Полная поддержка |
+| Пул соединений | Нет | Встроенный |
+| SQL-фильтрация | Нет | Полная поддержка |
+| Зависимости | ~10 MB (@lancedb/lancedb) | ~100 KB (pg) |
+| pgvector индекс | IVFFlat/HNSW | IVFFlat/HNSW |
+| Keyword boost | FTS (ngram) | pg_trgm |
+
 ## Конфигурация
 
 ### Переменные окружения
@@ -115,6 +157,17 @@ npx mcp-local-rag query "authentication API"
 | `RAG_DEVICE` | `cpu` | Устройство выполнения |
 | `RAG_DTYPE` | `fp32` | Квантование эмбеддингов |
 | `RAG_HYBRID_WEIGHT` | `0.6` | Вес keyword boost |
+| `VECTORDB_BACKEND` | `lancedb` | Бэкенд векторной БД: `lancedb` или `postgresql` |
+| `PG_HOST` | `localhost` | Хост PostgreSQL-сервера |
+| `PG_PORT` | `5432` | Порт PostgreSQL |
+| `PG_DATABASE` | (not set) | Имя базы данных PostgreSQL |
+| `PG_USER` | (not set) | Пользователь PostgreSQL |
+| `PG_PASSWORD` | (not set) | Пароль PostgreSQL |
+| `PG_SSL_MODE` | `disable` | Режим SSL: disable, allow, prefer, require, verify-ca, verify-full |
+| `PG_MAX_POOL_SIZE` | `20` | Максимальный размер пула соединений |
+| `PG_MIN_POOL_SIZE` | `0` | Минимальный размер пула соединений |
+| `RAG_EMBEDDING_DIMENSIONS` | `384` | Размерность эмбеддингов для pgvector |
+| `RAG_IVF_LISTS` | `100` | Количество списков IVFFlat индекса |
 
 ### Приоритет конфигурации
 1. CLI флаги
@@ -137,7 +190,10 @@ src/
 │   ├── llama-cpp.ts      # llama.cpp HTTP-бэкенд
 │   ├── factory.ts        # Фабрика createEmbedder()
 │   └── types.ts          # Общие типы
-├── vectordb/             # LanceDB операции
+├── vectordb/             # VectorDB операции (LanceDB + PostgreSQL)
+│   ├── index.ts          # Фабрика createVectordb(), VectorStore (LanceDB)
+│   ├── postgresql.ts     # PostgreSQLVectordb (PostgreSQL + pgvector)
+│   └── types.ts          # Интерфейсы, типы, константы
 ├── features/             # Feature flags
 ├── pdf-visual/           # Визуальный режим для PDF
 └── utils/                # Утилиты
@@ -653,7 +709,7 @@ npx mcp-local-rag delete ./docs/manual.pdf
 **Импортируемые модули:**
 ```typescript
 import { RAGServer } from 'mcp-local-rag/dist/server/index.js'
-import { VectorStore } from 'mcp-local-rag/dist/vectordb/index.js'
+import { createVectordb, VectorStore, PostgreSQLVectordb } from 'mcp-local-rag/dist/vectordb/index.js'
 import { Embedder, LlamaCppEmbedder, createEmbedder } from 'mcp-local-rag/dist/embedder/index.js'
 import { SemanticChunker } from 'mcp-local-rag/dist/chunker/index.js'
 import { DocumentParser } from 'mcp-local-rag/dist/parser/index.js'
@@ -683,6 +739,30 @@ const server = new RAGServer({
     batchSize: 16,
     timeout: 30000,
   },
+  baseDirs: ['./docs/'],
+  maxFileSize: 100 * 1024 * 1024,
+});
+
+await server.initialize();
+await server.run();
+```
+
+**Пример использования (PostgreSQL):**
+```typescript
+const server = new RAGServer({
+  vectordbBackend: 'postgresql',
+  pgConfig: {
+    host: 'localhost',
+    port: 5432,
+    database: 'mcp_local_rag',
+    user: 'postgres',
+    password: 'postgres',
+    sslMode: 'disable',
+    maxPoolSize: 20,
+    minPoolSize: 0,
+  },
+  embeddingDimension: 384,
+  ivfLists: 100,
   baseDirs: ['./docs/'],
   maxFileSize: 100 * 1024 * 1024,
 });

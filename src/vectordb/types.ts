@@ -30,24 +30,6 @@ export const DEFAULT_HYBRID_WEIGHT = 0.6
 export type GroupingMode = 'similar' | 'related'
 
 /**
- * VectorStore configuration
- */
-export interface VectorStoreConfig {
-  /** LanceDB database path */
-  dbPath: string
-  /** Table name */
-  tableName: string
-  /** Maximum distance threshold for filtering results (optional) */
-  maxDistance?: number
-  /** Grouping mode for quality filtering (optional) */
-  grouping?: GroupingMode
-  /** Hybrid search weight for BM25 (0.0 = vector only, 1.0 = BM25 only, default 0.6) */
-  hybridWeight?: number
-  /** Maximum number of files to keep in results (optional, filters by best score per file) */
-  maxFiles?: number
-}
-
-/**
  * Per-call options for {@link VectorStore.search}.
  * Grouped into an object (instead of positional params) so the caller can pass
  * any subset and so adding options (like `scope`) is not a breaking signature
@@ -277,6 +259,169 @@ export function toChunkRow(raw: unknown): ChunkRow {
     text: obj['text'],
     fileTitle,
   }
+}
+
+// ============================================
+// PostgreSQL Configuration
+// ============================================
+
+/**
+ * PostgreSQL connection configuration
+ */
+export interface PostgreSQLConfig {
+  /** PostgreSQL host */
+  host: string
+  /** PostgreSQL port (default: 5432) */
+  port: number
+  /** Database name */
+  database: string
+  /** Username */
+  user: string
+  /** Password */
+  password: string
+  /** PostgreSQL schema (default: 'public') — used for multi-tenant scenarios */
+  schema?: string
+  /** SSL mode: disable, allow, prefer, require, verify-ca, verify-full */
+  sslMode?: 'disable' | 'allow' | 'prefer' | 'require' | 'verify-ca' | 'verify-full'
+  /** Maximum pool size (default: 20) */
+  maxPoolSize?: number
+  /** Minimum pool size (default: 0) */
+  minPoolSize?: number
+}
+
+/**
+ * PostgreSQL-specific vector store configuration
+ */
+export interface PostgreSQLVectorStoreConfig {
+  /** PostgreSQL connection configuration */
+  pgConfig: PostgreSQLConfig
+  /** Table name for chunks (default: 'chunks') */
+  tableName?: string
+  /** Maximum distance threshold for filtering results (optional) */
+  maxDistance?: number
+  /** Grouping mode for quality filtering (optional) */
+  grouping?: GroupingMode
+  /** Hybrid search weight for pg_trgm keyword boost (0.0 = vector only, 1.0 = pg_trgm only, default 0.6) */
+  hybridWeight?: number
+  /** Maximum number of files to keep in results (optional, filters by best score per file) */
+  maxFiles?: number
+  /** Embedding dimension (default: 384 for all-MiniLM-L6-v2) */
+  embeddingDimension?: number
+  /** IVFFlat index lists count (default: 100) */
+  ivfLists?: number
+}
+
+/** Default PostgreSQL schema */
+export const DEFAULT_PG_SCHEMA = 'public'
+
+/**
+ * Unified vector store configuration — discriminator union based on backend type.
+ * The caller selects the backend via the `backend` field; the remaining fields
+ * depend on the selected backend.
+ */
+export type VectorStoreConfig =
+  | {
+      backend: 'lancedb'
+      dbPath: string
+      tableName: string
+      maxDistance?: number
+      grouping?: GroupingMode
+      hybridWeight?: number
+      maxFiles?: number
+    }
+  | {
+      backend: 'postgresql'
+      pgConfig: PostgreSQLConfig
+      tableName?: string
+      maxDistance?: number
+      grouping?: GroupingMode
+      hybridWeight?: number
+      maxFiles?: number
+      embeddingDimension?: number
+      ivfLists?: number
+    }
+
+// ============================================
+// IVectordb Interface
+// ============================================
+
+/**
+ * Interface for vector database backends.
+ *
+ * Both LanceDB and PostgreSQL implementations must conform to this contract.
+ * The interface is intentionally minimal — only the operations required by the
+ * RAG pipeline are exposed here; implementation-specific helpers live on the
+ * concrete classes.
+ */
+export interface IVectordb {
+  /**
+   * Initialize the database connection and ensure schema exists.
+   * For PostgreSQL: connect, verify pgvector extension, create tables and indexes.
+   * For LanceDB: connect to database path, create or open table.
+   */
+  initialize(): Promise<void>
+
+  /**
+   * Batch insert vector chunks into the database.
+   * For PostgreSQL: use transactional insert with UPSERT semantics.
+   * For LanceDB: use table.add() or createTable() on first insertion.
+   */
+  insertChunks(chunks: VectorChunk[]): Promise<void>
+
+  /**
+   * Delete all chunks for a given file path.
+   * @returns Number of chunks removed
+   */
+  deleteChunks(filePath: string): Promise<number>
+
+  /**
+   * Search for similar vectors with optional keyword boost.
+   * For PostgreSQL: use pgvector IVFFlat/HNSW index + pg_trgm for keyword boost.
+   * For LanceDB: use vector search + FTS index.
+   */
+  search(queryVector: number[], options?: SearchOptions): Promise<SearchResult[]>
+
+  /**
+   * Return every stored chunk for a file as a full {@link VectorChunk},
+   * suitable for backup/restore.
+   */
+  getChunksByFilePath(filePath: string): Promise<VectorChunk[]>
+
+  /**
+   * Return chunk rows for a single file whose chunkIndex is within the
+   * inclusive [minIdx, maxIdx] range, sorted ascending by chunkIndex.
+   */
+  getChunksByRange(filePath: string, minIdx: number, maxIdx: number): Promise<ChunkRow[]>
+
+  /**
+   * Return a list of ingested files with their chunk counts.
+   * For PostgreSQL: query the dedicated `files` table (no aggregation over chunks).
+   * For LanceDB: aggregate from chunk rows in memory.
+   */
+  listFiles(): Promise<{ filePath: string; chunkCount: number; timestamp: string }[]>
+
+  /**
+   * Get system status information.
+   */
+  getStatus(): Promise<{
+    documentCount: number
+    chunkCount: number
+    memoryUsage: number
+    uptime: number
+    ftsIndexEnabled: boolean
+    searchMode: 'hybrid' | 'vector-only'
+    backend: 'lancedb' | 'postgresql'
+  }>
+
+  /**
+   * Optimize the database (compact fragments, rebuild indexes, etc.).
+   */
+  optimize(): Promise<void>
+
+  /**
+   * Close the database connection and release resources.
+   */
+  close(): Promise<void>
 }
 
 // ============================================

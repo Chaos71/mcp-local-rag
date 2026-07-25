@@ -495,6 +495,28 @@ npx mcp-local-rag skills install --codex
 
 ## Конфигурация
 
+### Автоматическая загрузка .env
+
+mcp-local-rag автоматически загружает `.env` из текущей рабочей директории при каждом запуске. Переменные из `.env` применяются только если ещё не установлены из внешней среды (shell, docker-compose, CI/CD).
+
+Файл `.env` автоматически добавляется в `.gitignore` при первой загрузке.
+
+**Рекомендуемые переменные** (предупреждения выводятся при запуске, если отсутствуют):
+
+| Переменная | Описание |
+|------------|----------|
+| `BASE_DIR` | Корневая директория документов |
+| `DB_PATH` | Расположение векторной базы данных |
+| `CACHE_DIR` | Директория кэша моделей |
+| `MODEL_NAME` | Идентификатор модели HuggingFace |
+| `EMBEDDING_BACKEND` | Бэкенд эмбеддингов: `transformers` или `llama-cpp` |
+| `RAG_DEVICE` | Устройство выполнения: `cpu` или `webgpu` |
+
+**Отключить предупреждения о конфигурации:**
+```bash
+export RAG_QUIET_CONFIG=1
+```
+
 ### Переменные окружения и флаги CLI
 
 MCP-сервер настраивается только переменными окружения — передавайте их через блок `env` вашего MCP-клиента. CLI принимает те же env-переменные плюс эквивалентные флаги (приоритет: флаг CLI > env > по умолчанию). Флаги CLI не принимаются в голый запуск `mcp-local-rag` (MCP-сервер).
@@ -586,6 +608,76 @@ MCP-сервер настраивается только переменными 
 - Требуется отдельный процесс сервера llama.cpp
 - HTTP-задержка (~5-15 мс на запрос)
 - Нет автоматического управления моделями
+
+### PostgreSQL как бэкенд векторной БД
+
+Для корпоративных сценариев (распределённое хранение, репликация, SQL-фильтрация) доступен PostgreSQL-бэкенд с расширением pgvector.
+
+**Требования:**
+- PostgreSQL 14+ с установленным расширением `pgvector`:
+  ```sql
+  CREATE EXTENSION vector;
+  ```
+
+**Настройка:**
+
+**MCP-клиент (Cursor/Codex/Claude Code):**
+```json
+{
+  "mcpServers": {
+    "local-rag": {
+      "command": "npx",
+      "args": ["-y", "mcp-local-rag"],
+      "env": {
+        "BASE_DIR": "/path/to/your/documents",
+        "VECTORDB_BACKEND": "postgresql",
+        "PG_HOST": "localhost",
+        "PG_PORT": "5432",
+        "PG_DATABASE": "mcp_local_rag",
+        "PG_USER": "postgres",
+        "PG_PASSWORD": "postgres",
+        "PG_SSL_MODE": "disable"
+      }
+    }
+  }
+}
+```
+
+**CLI:**
+```bash
+VECTORDB_BACKEND=postgresql PG_HOST=localhost PG_DATABASE=mcp_local_rag \
+  PG_USER=postgres PG_PASSWORD=postgres \
+  npx mcp-local-rag ingest ./docs/
+```
+
+**Параметры конфигурации:**
+
+| Переменная окружения | По умолчанию | Описание |
+|---------------------|--------------|----------|
+| `VECTORDB_BACKEND` | `lancedb` | Бэкенд векторной БД: `lancedb` или `postgresql` |
+| `PG_HOST` | `localhost` | Хост PostgreSQL-сервера |
+| `PG_PORT` | `5432` | Порт PostgreSQL |
+| `PG_DATABASE` | (обязательно) | Имя базы данных |
+| `PG_USER` | (обязательно) | Пользователь базы данных |
+| `PG_PASSWORD` | (обязательно) | Пароль базы данных |
+| `PG_SSL_MODE` | `disable` | Режим SSL: disable, allow, prefer, require, verify-ca, verify-full |
+| `PG_MAX_POOL_SIZE` | `20` | Максимальный размер пула соединений (1–100) |
+| `PG_MIN_POOL_SIZE` | `0` | Минимальный размер пула соединений (0–100) |
+| `RAG_EMBEDDING_DIMENSIONS` | `384` | Размерность эмбеддингов для pgvector (384 для all-MiniLM-L6-v2, 4096 для Qwen3-Embedding-4B) |
+| `RAG_IVF_LISTS` | `100` | Количество списков IVFFlat индекса (1–10000) |
+
+**Сравнение бэкендов:**
+
+| Характеристика | LanceDB | PostgreSQL |
+|----------------|---------|------------|
+| Хранение | File-based (локально) | Серверная БД |
+| Масштабирование | Single-node | Репликация, кластеры |
+| Транзакции | Нет | Полная поддержка |
+| Пул соединений | Нет | Встроенный |
+| SQL-фильтрация | Нет | Полная поддержка |
+| Зависимости | ~10 MB (@lancedb/lancedb) | ~100 KB (pg) |
+| pgvector индекс | IVFFlat/HNSW | IVFFlat/HNSW |
+| Keyword boost | FTS (ngram) | pg_trgm |
 
 ### Корневые директории документов (`BASE_DIR` и `BASE_DIRS`)
 

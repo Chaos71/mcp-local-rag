@@ -45,6 +45,7 @@ export function formatCliError(error: unknown): string {
  */
 export function createVectorStore(config: ResolvedGlobalConfig): VectorStore {
   return new VectorStore({
+    backend: 'lancedb' as const,
     dbPath: config.dbPath,
     tableName: 'chunks',
   })
