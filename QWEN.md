@@ -57,7 +57,11 @@ src/
 │   └── error-utils.ts
 ├── parser/               # Парсинг документов (PDF, DOCX, TXT, MD, HTML)
 ├── chunker/              # Семантическое чанкирование текста
-├── embedder/             # Transformers.js эмбеддинги
+├── embedder/             # Эмбеддинги (Transformers.js + llama.cpp)
+│   ├── index.ts          # Интерфейс IEmbedder, Transformers.js бэкенд
+│   ├── llama-cpp.ts      # llama.cpp HTTP-бэкенд
+│   ├── factory.ts        # Фабрика createEmbedder()
+│   └── types.ts          # Общие типы
 ├── vectordb/             # LanceDB операции
 ├── features/             # Feature flags
 ├── pdf-visual/           # Визуальный режим для PDF (VLM)
@@ -95,6 +99,32 @@ src/
 | `MODEL_NAME` | `Xenova/all-MiniLM-L6-v2` | HuggingFace модель |
 | `RAG_HYBRID_WEIGHT` | `0.6` | Вес keyword boost |
 | `RAG_DEVICE` | `cpu` | Устройство выполнения |
+| `EMBEDDING_BACKEND` | `transformers` | Бэкенд эмбеддингов: `transformers` или `llama-cpp` |
+| `LLAMA_CPP_SERVER_URL` | `http://127.0.0.1:8080` | URL сервера llama.cpp |
+| `LLAMA_CPP_BATCH_SIZE` | `16` | Размер батча для llama.cpp (1–128) |
+| `LLAMA_CPP_TIMEOUT` | `30000` | Таймаут запроса llama.cpp (мс) |
+| `RAG_LLAMA_CPP_DIMENSIONS` | `4096` | Размерность эмбеддингов llama.cpp (переопределение) |
+
+### Локальные LLM через llama.cpp
+
+Для использования современных GGUF-моделей эмбеддингов (Qwen3-Embedding-4B, nomic-embed-text-v1.5):
+
+1. Запустите сервер llama.cpp вручную:
+   ```bash
+   llama-server --model ./models/Qwen3-Embedding-4B.gguf --port 8080 --embedding
+   ```
+
+2. Настройте bэкенд через переменные окружения:
+   ```bash
+   export EMBEDDING_BACKEND=llama-cpp
+   export LLAMA_CPP_SERVER_URL=http://127.0.0.1:8080
+   ```
+
+3. Запустите mcp-local-rag как обычно.
+
+**Поддерживаемые модели:**
+- **Qwen/Qwen3-Embedding-4B** — 4096 размерность, современная модель от Alibaba
+- **nomic-ai/nomic-embed-text-v1.5** — 768 размерность, качественная модель с хорошей семантикой
 
 ### Приоритет конфигурации
 1. CLI флаги

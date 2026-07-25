@@ -235,6 +235,126 @@ npx mcp-local-rag delete --source "https://..."  # Remove by source URL
 
 > ⚠️ The CLI does **not** read your MCP client config (`mcp.json`, `config.toml`, etc.). Configure the CLI via flags or environment variables as shown below.
 
+### Command-Line Examples
+
+#### Basic usage
+
+```bash
+# Ingest a single file
+npx mcp-local-rag ingest ./docs/api-spec.pdf
+
+# Ingest an entire directory
+npx mcp-local-rag ingest ./docs/
+
+# Search documents
+npx mcp-local-rag query "authentication API"
+
+# Search with custom limit
+npx mcp-local-rag query "authentication" --limit 5
+
+# List all ingested files
+npx mcp-local-rag list
+
+# Show database statistics
+npx mcp-local-rag status
+```
+
+#### Using custom paths
+
+```bash
+# Use custom database location
+npx mcp-local-rag --db-path ./my-db query "authentication"
+
+# Use custom model cache directory
+npx mcp-local-rag --cache-dir ./cache query "search term"
+
+# Use custom model (must match MCP server's MODEL_NAME)
+npx mcp-local-rag --model-name Xenova/all-MiniLM-L6-v2 query "search"
+```
+
+#### Multi-root document directories
+
+```bash
+# Ingest with multiple document roots
+npx mcp-local-rag ingest --base-dir ./docs --base-dir ./specs ./docs/readme.md
+
+# List files from specific roots
+npx mcp-local-rag list --base-dir ./docs --base-dir ./specs
+
+# Search only in API documentation
+npx mcp-local-rag query "auth" --scope /docs/api
+```
+
+#### Search tuning
+
+```bash
+# Search with keyword boost (higher value = stronger keyword matching)
+RAG_HYBRID_WEIGHT=0.7 npx mcp-local-rag query "useEffect"
+
+# Get only top result group
+RAG_GROUPING=similar npx mcp-local-rag query "error handling"
+
+# Filter by relevance threshold
+RAG_MAX_DISTANCE=0.5 npx mcp-local-rag query "authentication"
+
+# Limit to single best file
+RAG_MAX_FILES=1 npx mcp-local-rag query "API documentation"
+```
+
+#### Using llama.cpp backend
+
+```bash
+# Ingest with llama.cpp backend
+EMBEDDING_BACKEND=llama-cpp LLAMA_CPP_SERVER_URL=http://127.0.0.1:8080 \
+  npx mcp-local-rag ingest ./docs/
+
+# Search with llama.cpp backend
+EMBEDDING_BACKEND=llama-cpp LLAMA_CPP_BATCH_SIZE=32 \
+  npx mcp-local-rag query "technical terms"
+```
+
+#### Visual PDF mode
+
+```bash
+# Ingest PDF with visual captions (fast profile)
+npx mcp-local-rag ingest ./docs/paper.pdf --visual
+
+# Ingest PDF with quality profile
+npx mcp-local-rag ingest ./docs/paper.pdf --visual --visual-quality quality
+```
+
+#### Piping results
+
+```bash
+# Search and filter with jq
+npx mcp-local-rag query "authentication" | jq '.results[] | select(.score > 0.7)'
+
+# Search and count results
+npx mcp-local-rag query "error handling" | jq '.results | length'
+
+# Search and extract file paths only
+npx mcp-local-rag query "API" | jq -r '.results[].filePath'
+```
+
+#### Configuration with environment variables
+
+```bash
+# Set all configuration in one command
+export BASE_DIR=./docs
+export DB_PATH=./lancedb
+export RAG_HYBRID_WEIGHT=0.7
+
+npx mcp-local-rag query "authentication"
+```
+
+#### Configuration priority
+
+1. **CLI flags** (highest priority) — `npx mcp-local-rag --db-path ./my-db query "auth"`
+2. **Environment variables** — `export DB_PATH=./my-db && npx mcp-local-rag query "auth"`
+3. **Defaults** — applied when neither flags nor env vars are set
+
+> ⚠️ The CLI does **not** read your MCP client config (`mcp.json`, `config.toml`, etc.). Configure the CLI via flags or environment variables as shown below.
+
 #### Configuration
 
 **CLI flags** — global options go before the subcommand, subcommand options go after:
@@ -397,6 +517,75 @@ The MCP server is configured by environment variables only — pass them through
 - Code repositories → default often suffices; keyword boost matters more (or `jinaai/jina-embeddings-v2-base-code`)
 
 ⚠️ Changing `MODEL_NAME` changes embedding dimensions. Delete `DB_PATH` and re-ingest after switching models.
+
+### llama.cpp Backend (Local LLM)
+
+For users who want to leverage modern embedding models available only in GGUF format (e.g., **Qwen3-Embedding-4B**, **nomic-embed-text-v1.5**), mcp-local-rag supports a secondary embedding backend powered by llama.cpp.
+
+**Supported models:**
+
+| Model | Dimensions | Source |
+|-------|------------|--------|
+| Qwen/Qwen3-Embedding-4B | 4096 | [HuggingFace](https://huggingface.co/Qwen/Qwen3-Embedding-4B) |
+| nomic-ai/nomic-embed-text-v1.5 | 768 | [HuggingFace](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5) |
+
+**Setup:**
+
+1. Install llama.cpp and download a GGUF embedding model:
+   ```bash
+   # Download Qwen3-Embedding-4B
+   huggingface-cli download Qwen/Qwen3-Embedding-4B --include "*.gguf"
+   ```
+
+2. Start the llama.cpp server:
+   ```bash
+   llama-server --model ./Qwen3-Embedding-4B.gguf --port 8080 --embedding
+   ```
+
+3. Configure mcp-local-rag to use the llama.cpp backend:
+
+   **MCP client (Cursor/Codex/Claude Code):**
+   ```json
+   {
+     "mcpServers": {
+       "local-rag": {
+         "command": "npx",
+         "args": ["-y", "mcp-local-rag"],
+         "env": {
+           "BASE_DIR": "/path/to/your/documents",
+           "EMBEDDING_BACKEND": "llama-cpp",
+           "LLAMA_CPP_SERVER_URL": "http://127.0.0.1:8080"
+         }
+       }
+     }
+   }
+   ```
+
+   **CLI:**
+   ```bash
+   EMBEDDING_BACKEND=llama-cpp LLAMA_CPP_SERVER_URL=http://127.0.0.1:8080 \
+     npx mcp-local-rag ingest ./docs/
+   ```
+
+**Configuration options:**
+
+| Environment Variable | CLI Flag | Default | Description |
+|---------------------|----------|---------|-------------|
+| `EMBEDDING_BACKEND` | `--embedding-backend` | `transformers` | Backend: `transformers` or `llama-cpp` |
+| `LLAMA_CPP_SERVER_URL` | — | `http://127.0.0.1:8080` | llama.cpp server URL |
+| `LLAMA_CPP_BATCH_SIZE` | — | `16` | Batch size for requests (1–128) |
+| `LLAMA_CPP_TIMEOUT` | — | `30000` | Request timeout in milliseconds (1000–300000) |
+| `RAG_LLAMA_CPP_DIMENSIONS` | — | `4096` | Override embedding dimensions (for non-Qwen3 models) |
+
+**Advantages:**
+- Access to modern GGUF models not available in Transformers.js
+- GPU acceleration via CUDA/Vulkan (if supported by your hardware)
+- Server can run on a separate machine
+
+**Limitations:**
+- Requires a separate llama.cpp server process
+- HTTP latency (~5-15ms per request)
+- No automatic model management
 
 ### Document Roots (`BASE_DIR` and `BASE_DIRS`)
 

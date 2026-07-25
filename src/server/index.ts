@@ -12,7 +12,9 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js'
 import { DEFAULT_MIN_CHUNK_LENGTH, SemanticChunker } from '../chunker/index.js'
-import { Embedder } from '../embedder/index.js'
+import { createEmbedder } from '../embedder/factory.js'
+import type { Embedder, IEmbedder } from '../embedder/index.js'
+import type { EmbeddingBackend, LlamaCppConfig } from '../embedder/types.js'
 import { listDocuments } from '../features/list.js'
 import { buildChunksAndEmbeddings, buildVectorChunks } from '../ingest/compute.js'
 import { prepareVisualPdfChunks } from '../ingest/visual.js'
@@ -96,7 +98,7 @@ const packageVersion = (createRequire(import.meta.url)('../../package.json') as 
 export class RAGServer {
   private readonly server: Server
   private readonly vectorStore: VectorStore
-  private readonly embedder: Embedder
+  private readonly embedder: IEmbedder
   private readonly chunker: SemanticChunker
   private readonly parser: DocumentParser
   private readonly dbPath: string
@@ -174,18 +176,32 @@ export class RAGServer {
       vectorStoreConfig.maxFiles = config.maxFiles
     }
     this.vectorStore = new VectorStore(vectorStoreConfig)
-    const embedderConfig: ConstructorParameters<typeof Embedder>[0] = {
-      modelPath: config.modelName,
-      batchSize: 16,
-      cacheDir: config.cacheDir,
+
+    // Create embedder using factory based on selected backend
+    const backend = config.embeddingBackend ?? 'transformers'
+    if (backend === 'llama-cpp' && !config.llamaCppConfig) {
+      throw new Error('llamaCppConfig is required when embeddingBackend is "llama-cpp"')
     }
-    if (config.device !== undefined) {
-      embedderConfig.device = config.device
+    // Build the config object, conditionally including llamaCppConfig to avoid
+    // exactOptionalPropertyTypes issues with undefined values.
+    const embedderArgs: {
+      backend: EmbeddingBackend
+      transformersConfig: ConstructorParameters<typeof Embedder>[0]
+      llamaCppConfig?: LlamaCppConfig
+    } = {
+      backend,
+      transformersConfig: {
+        modelPath: config.modelName,
+        batchSize: 16,
+        cacheDir: config.cacheDir,
+        ...(config.device !== undefined ? { device: config.device } : {}),
+        ...(config.dtype !== undefined ? { dtype: config.dtype } : {}),
+      },
     }
-    if (config.dtype !== undefined) {
-      embedderConfig.dtype = config.dtype
+    if (config.llamaCppConfig !== undefined) {
+      embedderArgs.llamaCppConfig = config.llamaCppConfig
     }
-    this.embedder = new Embedder(embedderConfig)
+    this.embedder = createEmbedder(embedderArgs as Parameters<typeof createEmbedder>[0])
     this.chunker = new SemanticChunker(
       config.chunkMinLength !== undefined ? { minChunkLength: config.chunkMinLength } : {}
     )

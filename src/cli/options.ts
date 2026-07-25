@@ -109,10 +109,28 @@ export function requireFlagValue(argv: string[], flagIndex: number, flag: string
 // Types
 // ============================================
 
+/**
+ * Supported embedding backends.
+ * - `transformers`: Transformers.js (default, local ONNX model)
+ * - `llama-cpp`: llama.cpp HTTP server (requires manual server startup)
+ */
+export type EmbeddingBackend = 'transformers' | 'llama-cpp'
+
 export interface GlobalOptions {
   dbPath?: string | undefined
   cacheDir?: string | undefined
   modelName?: string | undefined
+  /**
+   * Embedding generation backend.
+   * - `transformers`: Transformers.js (default, local ONNX model)
+   * - `llama-cpp`: llama.cpp HTTP server (requires manual server startup)
+   */
+  embeddingBackend?: EmbeddingBackend | undefined
+  /**
+   * Model name for llama.cpp embedding backend (OpenAI-compatible API).
+   * Should match the model loaded on the llama.cpp server.
+   */
+  llamaCppModel?: string | undefined
 }
 
 export interface ParsedGlobalResult {
@@ -124,6 +142,17 @@ export interface ResolvedGlobalConfig {
   dbPath: string
   cacheDir: string
   modelName: string
+  /**
+   * Embedding generation backend.
+   * - `transformers`: Transformers.js (default, local ONNX model)
+   * - `llama-cpp`: llama.cpp HTTP server (requires manual server startup)
+   */
+  embeddingBackend: EmbeddingBackend
+  /**
+   * Model name for llama.cpp embedding backend (OpenAI-compatible API).
+   * Should match the model loaded on the llama.cpp server.
+   */
+  llamaCppModel?: string
 }
 
 // ============================================
@@ -146,6 +175,10 @@ Options:
   --db-path <path>       LanceDB database path (default: ${GLOBAL_DEFAULTS.dbPath})
   --cache-dir <path>     Model cache directory (default: ${GLOBAL_DEFAULTS.cacheDir})
   --model-name <name>    Embedding model (default: ${GLOBAL_DEFAULTS.modelName})
+  --embedding-backend <backend>
+                         Embedding backend: "transformers" or "llama-cpp" (default: transformers)
+  --llama-cpp-model <name>
+                         Model name for llama.cpp embedding backend (OpenAI-compatible API)
   -h, --help             Show this help
 
 Commands:
@@ -197,6 +230,23 @@ export function parseGlobalOptions(args: string[]): ParsedGlobalResult {
         i += 2
         break
       }
+      case '--embedding-backend': {
+        const value = requireFlagValue(args, i, '--embedding-backend').toLowerCase().trim()
+        if (value !== 'transformers' && value !== 'llama-cpp') {
+          console.error(
+            `Invalid --embedding-backend value: "${value}". Expected "transformers" or "llama-cpp".`
+          )
+          process.exit(1)
+        }
+        globalOptions.embeddingBackend = value
+        i += 2
+        break
+      }
+      case '--llama-cpp-model': {
+        globalOptions.llamaCppModel = requireFlagValue(args, i, '--llama-cpp-model')
+        i += 2
+        break
+      }
       default:
         // If arg starts with -, it's an unknown global flag
         if (arg.startsWith('-')) {
@@ -236,6 +286,11 @@ export function resolveGlobalConfig(options: GlobalOptions): ResolvedGlobalConfi
   const dbPath = options.dbPath ?? process.env['DB_PATH'] ?? GLOBAL_DEFAULTS.dbPath
   const cacheDir = options.cacheDir ?? process.env['CACHE_DIR'] ?? GLOBAL_DEFAULTS.cacheDir
   const modelName = options.modelName ?? process.env['MODEL_NAME'] ?? GLOBAL_DEFAULTS.modelName
+  const embeddingBackend =
+    options.embeddingBackend ??
+    (process.env['EMBEDDING_BACKEND'] as EmbeddingBackend | undefined) ??
+    'transformers'
+  const llamaCppModel = options.llamaCppModel ?? process.env['LLAMA_CPP_MODEL']
 
   // Validate paths
   const dbPathError = validatePath(dbPath, '--db-path')
@@ -257,7 +312,12 @@ export function resolveGlobalConfig(options: GlobalOptions): ResolvedGlobalConfi
     process.exit(1)
   }
 
-  return { dbPath, cacheDir, modelName }
+  // Build result (exactOptionalPropertyTypes compliance: only include llamaCppModel when defined)
+  const result: ResolvedGlobalConfig = { dbPath, cacheDir, modelName, embeddingBackend }
+  if (llamaCppModel !== undefined) {
+    result.llamaCppModel = llamaCppModel
+  }
+  return result
 }
 
 /**

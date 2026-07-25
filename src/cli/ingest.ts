@@ -4,7 +4,7 @@ import { stat } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 
 import { SemanticChunker } from '../chunker/index.js'
-import type { Embedder } from '../embedder/index.js'
+import type { IEmbedder } from '../embedder/index.js'
 import { buildChunksAndEmbeddings, buildVectorChunks } from '../ingest/compute.js'
 import { prepareVisualPdfChunks } from '../ingest/visual.js'
 import { DocumentParser } from '../parser/index.js'
@@ -320,7 +320,7 @@ export async function ingestSingleFile(
   filePath: string,
   parser: DocumentParser,
   chunker: SemanticChunker,
-  embedder: Embedder,
+  embedder: IEmbedder,
   vectorStore: VectorStore,
   options?: IngestSingleFileOptions
 ): Promise<number> {
