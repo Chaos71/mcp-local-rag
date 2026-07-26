@@ -145,6 +145,17 @@ export function buildSchemaSQL(config: PostgreSQLVectorStoreConfig): string[] {
 }
 
 // ============================================
+// Dimension Mismatch Result Type
+// ============================================
+
+/**
+ * Result of a dimension mismatch check.
+ */
+interface DimensionMismatchResult {
+  current: number
+}
+
+// ============================================
 // PostgreSQLVectordb Class
 // ============================================
 
@@ -179,6 +190,45 @@ export class PostgreSQLVectordb implements IVectordb {
     this.embeddingDim = config.embeddingDimension ?? 384
     // ivfLists is used in schema creation (buildSchemaSQL) but not stored here
     this.schema = config.pgConfig.schema || DEFAULT_PG_SCHEMA
+  }
+
+  // ============================================
+  // Dimension Mismatch Detection
+  // ============================================
+
+  /**
+   * Check if the existing table's embedding column has a different dimension
+   * than the configured one. Returns null if no mismatch or table doesn't exist.
+   *
+   * Uses pg_attribute to read the column's typmod, which for pgvector columns
+   * encodes the dimension (e.g., vector(384) has typmod = 384).
+   */
+  private async checkDimensionMismatch(client: any): Promise<null | DimensionMismatchResult> {
+    try {
+      const result = await client.query(
+        `SELECT a.atttypmod FROM pg_attribute a
+         JOIN pg_class c ON a.attrelid = c.oid
+         JOIN pg_namespace n ON c.relnamespace = n.oid
+         WHERE c.relname = $1 AND n.nspname = $2 AND a.attname = 'embedding'`,
+        [this.tableName, this.schema]
+      )
+
+      if (result.rows.length === 0) {
+        // Table doesn't exist yet — no mismatch
+        return null
+      }
+
+      // pgvector stores dimension as typmod (atttypmod)
+      const currentDim = result.rows[0].atttypmod
+      if (currentDim === this.embeddingDim) {
+        return null
+      }
+
+      return { current: currentDim }
+    } catch (_error) {
+      // If we can't check (e.g., older pgvector without typmod), skip
+      return null
+    }
   }
 
   // ============================================
@@ -282,6 +332,23 @@ export class PostgreSQLVectordb implements IVectordb {
       const schemaSQL = buildSchemaSQL(this.config)
       for (const sql of schemaSQL) {
         await client.query(sql)
+      }
+
+      // Check if the existing table has a different embedding dimension.
+      // If so, drop and recreate the table with the correct dimension to
+      // avoid "expected N dimensions, not M" errors during insert.
+      const dimMismatch = await this.checkDimensionMismatch(client)
+      if (dimMismatch) {
+        console.error(
+          `PostgreSQLVectordb: Table dimension mismatch detected (${dimMismatch.current} → ${this.embeddingDim}). ` +
+            'Dropping and recreating table with correct dimension.'
+        )
+        // Drop table cascades indexes and constraints automatically
+        await client.query(`DROP TABLE IF EXISTS ${qualified(this.tableName, this.schema)} CASCADE`)
+        // Re-run CREATE TABLE + indexes from schemaSQL
+        for (const sql of schemaSQL) {
+          await client.query(sql)
+        }
       }
 
       this.initialized = true
