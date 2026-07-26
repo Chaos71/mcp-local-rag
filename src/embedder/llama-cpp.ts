@@ -283,6 +283,8 @@ export class LlamaCppEmbedder implements IEmbedder {
       throw new EmbeddingError('Cannot generate embedding for empty text')
     }
 
+    console.error(`LlamaCppEmbedder: Starting batch of ${texts.length} texts`)
+
     const results: number[][] = []
     const batchInterval = this.config.batchInterval
 
@@ -291,10 +293,16 @@ export class LlamaCppEmbedder implements IEmbedder {
         // Wait between requests to avoid rate limiting
         await new Promise((resolve) => setTimeout(resolve, batchInterval))
       }
+      console.error(
+        `LlamaCppEmbedder: Processing text ${i + 1}/${texts.length} (${texts[i]!.length} chars)`
+      )
       const embedding = await this.embed(texts[i]!)
       results.push(embedding)
     }
 
+    console.error(
+      `LlamaCppEmbedder: Batch complete — ${results.length} embeddings generated (${results[0]?.length ?? 0} dims each)`
+    )
     return results
   }
 

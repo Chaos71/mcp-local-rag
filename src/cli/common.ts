@@ -5,6 +5,7 @@ import { createEmbedder as createEmbedderFactory } from '../embedder/factory.js'
 import type { EmbedderConfig, IEmbedder } from '../embedder/index.js'
 import { LlamaCppEmbedder } from '../embedder/llama-cpp.js'
 import type { EmbeddingBackend, LlamaCppConfig } from '../embedder/types.js'
+import { parsePgSslMode } from '../server-main.js'
 import {
   type BaseDirsConfig,
   type BaseDirsConfigWarning,
@@ -13,7 +14,7 @@ import {
 } from '../utils/base-dirs.js'
 import { getCauseChain } from '../utils/errors.js'
 import { checkSensitivePath } from '../utils/sensitive-path.js'
-import { VectorStore } from '../vectordb/index.js'
+import { PostgreSQLVectordb, VectorStore } from '../vectordb/index.js'
 import { type ResolvedGlobalConfig, resolveDevice, resolveDtype, validatePath } from './options.js'
 
 /**
@@ -42,10 +43,43 @@ export function formatCliError(error: unknown): string {
 /**
  * Create an uninitialized VectorStore from resolved global config.
  * Callers are responsible for calling initialize() before use.
+ *
+ * Supports both LanceDB (default) and PostgreSQL backends based on
+ * the `vectordbBackend` configuration.
  */
-export function createVectorStore(config: ResolvedGlobalConfig): VectorStore {
+export function createVectorStore(config: ResolvedGlobalConfig): VectorStore | PostgreSQLVectordb {
+  if (config.vectordbBackend === 'postgresql') {
+    // PostgreSQL backend — requires pgConfig with connection details
+    const pgConfig = {
+      host: process.env['PG_HOST'] ?? 'localhost',
+      port: Number.parseInt(process.env['PG_PORT'] ?? '5432', 10) || 5432,
+      database: process.env['PG_DATABASE'] ?? '',
+      user: process.env['PG_USER'] ?? '',
+      password: process.env['PG_PASSWORD'] ?? '',
+      sslMode: parsePgSslMode(process.env['PG_SSL_MODE']).value!,
+      maxPoolSize: Number.parseInt(process.env['PG_MAX_POOL_SIZE'] ?? '20', 10) || 20,
+      minPoolSize: Number.parseInt(process.env['PG_MIN_POOL_SIZE'] ?? '0', 10) || 0,
+      schema: process.env['PG_SCHEMA'] ?? 'public',
+    }
+
+    const embeddingDimension =
+      Number.parseInt(process.env['RAG_EMBEDDING_DIMENSIONS'] ?? '384', 10) || 384
+    const ivfLists = Number.parseInt(process.env['RAG_IVF_LISTS'] ?? '100', 10) || 100
+    const hybridWeight = parseFloat(process.env['RAG_HYBRID_WEIGHT'] ?? '0.6') || 0.6
+
+    return new PostgreSQLVectordb({
+      backend: 'postgresql' as const,
+      tableName: 'chunks',
+      embeddingDimension,
+      ivfLists,
+      hybridWeight,
+      pgConfig,
+    })
+  }
+
+  // Default: LanceDB (backward compatible)
   return new VectorStore({
-    backend: 'lancedb' as const,
+    backend: 'lancedb',
     dbPath: config.dbPath,
     tableName: 'chunks',
   })

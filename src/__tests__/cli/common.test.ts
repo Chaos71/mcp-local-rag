@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 const mocks = vi.hoisted(() => {
   return {
     VectorStore: vi.fn(),
+    PostgreSQLVectordb: vi.fn(),
     Embedder: vi.fn(),
   }
 })
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => {
 
 const vectordbFactory = () => ({
   VectorStore: mocks.VectorStore,
+  PostgreSQLVectordb: mocks.PostgreSQLVectordb,
 })
 
 const embedderFactory = () => ({
@@ -70,6 +72,7 @@ describe('cli/common', () => {
   describe('createVectorStore', () => {
     afterEach(() => {
       mocks.VectorStore.mockReset()
+      mocks.PostgreSQLVectordb.mockReset()
     })
 
     it('should construct VectorStore with dbPath from config', () => {
@@ -77,9 +80,64 @@ describe('cli/common', () => {
 
       expect(mocks.VectorStore).toHaveBeenCalledOnce()
       expect(mocks.VectorStore).toHaveBeenCalledWith({
+        backend: 'lancedb',
         dbPath: '/data/my-db',
         tableName: 'chunks',
       })
+    })
+
+    it('should construct PostgreSQLVectordb when vectordbBackend is postgresql', () => {
+      // Set PostgreSQL environment variables
+      process.env['PG_HOST'] = 'pg.example.com'
+      process.env['PG_PORT'] = '5433'
+      process.env['PG_DATABASE'] = 'mydb'
+      process.env['PG_USER'] = 'pguser'
+      process.env['PG_PASSWORD'] = 'pgpass'
+      process.env['PG_SSL_MODE'] = 'prefer'
+      process.env['PG_MAX_POOL_SIZE'] = '30'
+      process.env['PG_MIN_POOL_SIZE'] = '5'
+      process.env['PG_SCHEMA'] = 'myschema'
+      process.env['RAG_EMBEDDING_DIMENSIONS'] = '768'
+      process.env['RAG_IVF_LISTS'] = '200'
+      process.env['RAG_HYBRID_WEIGHT'] = '0.8'
+
+      try {
+        createVectorStore(makeConfig({ dbPath: '/data/my-db', vectordbBackend: 'postgresql' }))
+
+        expect(mocks.PostgreSQLVectordb).toHaveBeenCalledOnce()
+        expect(mocks.PostgreSQLVectordb).toHaveBeenCalledWith({
+          backend: 'postgresql',
+          tableName: 'chunks',
+          embeddingDimension: 768,
+          ivfLists: 200,
+          hybridWeight: 0.8,
+          pgConfig: {
+            host: 'pg.example.com',
+            port: 5433,
+            database: 'mydb',
+            user: 'pguser',
+            password: 'pgpass',
+            sslMode: 'prefer',
+            maxPoolSize: 30,
+            minPoolSize: 5,
+            schema: 'myschema',
+          },
+        })
+      } finally {
+        // Clean up environment variables
+        delete process.env['PG_HOST']
+        delete process.env['PG_PORT']
+        delete process.env['PG_DATABASE']
+        delete process.env['PG_USER']
+        delete process.env['PG_PASSWORD']
+        delete process.env['PG_SSL_MODE']
+        delete process.env['PG_MAX_POOL_SIZE']
+        delete process.env['PG_MIN_POOL_SIZE']
+        delete process.env['PG_SCHEMA']
+        delete process.env['RAG_EMBEDDING_DIMENSIONS']
+        delete process.env['RAG_IVF_LISTS']
+        delete process.env['RAG_HYBRID_WEIGHT']
+      }
     })
   })
 

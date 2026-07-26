@@ -11,7 +11,7 @@ import { DocumentParser } from '../parser/index.js'
 import type { QualityProfile } from '../pdf-visual/types.js'
 import type { BaseDirsConfig, BaseDirsConfigWarning } from '../utils/base-dirs.js'
 import { DEFAULT_MAX_FILE_SIZE } from '../utils/limits.js'
-import type { VectorStore } from '../vectordb/index.js'
+import type { PostgreSQLVectordb, VectorStore } from '../vectordb/index.js'
 import {
   createEmbedder,
   createVectorStore,
@@ -321,7 +321,7 @@ export async function ingestSingleFile(
   parser: DocumentParser,
   chunker: SemanticChunker,
   embedder: IEmbedder,
-  vectorStore: VectorStore,
+  vectorStore: VectorStore | PostgreSQLVectordb,
   options?: IngestSingleFileOptions
 ): Promise<number> {
   // Parse file

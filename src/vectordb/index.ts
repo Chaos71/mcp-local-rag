@@ -607,6 +607,6 @@ export function createVectordb(config: VectorStoreConfig): IVectordb {
   if (config.backend === 'postgresql') {
     return new PostgreSQLVectordb(config as NonNullable<typeof config> & { backend: 'postgresql' })
   }
-  // Default to LanceDB (backward compatible)
+  // Default to LanceDB (backward compatible) — cast to lancedb-specific config
   return new VectorStore(config as VectorStoreConfig & { backend: 'lancedb' })
 }

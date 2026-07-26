@@ -293,6 +293,8 @@ export interface PostgreSQLConfig {
  * PostgreSQL-specific vector store configuration
  */
 export interface PostgreSQLVectorStoreConfig {
+  /** Backend discriminator (always 'postgresql') */
+  backend: 'postgresql'
   /** PostgreSQL connection configuration */
   pgConfig: PostgreSQLConfig
   /** Table name for chunks (default: 'chunks') */

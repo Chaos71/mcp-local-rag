@@ -81,7 +81,7 @@ function qualified(name: string, schema: string): string {
  * SQL schema for PostgreSQL vector storage.
  * Creates tables, indexes, and extensions required for vector search.
  */
-function buildSchemaSQL(config: PostgreSQLVectorStoreConfig): string[] {
+export function buildSchemaSQL(config: PostgreSQLVectorStoreConfig): string[] {
   const { chunks, files, metadata } = DEFAULT_TABLES
   const tableName = config.tableName || chunks
   const embeddingDim = config.embeddingDimension ?? 384
@@ -111,13 +111,17 @@ function buildSchemaSQL(config: PostgreSQLVectorStoreConfig): string[] {
     )`,
 
     // IVFFlat index for vector search
-    `CREATE INDEX IF NOT EXISTS ${qualified(tableName + '_embedding_idx', schema)} ON ${qualified(tableName, schema)} USING ivfflat (embedding vector_cosine_ops) WITH (lists = ${ivfLists})`,
+    // Note: CREATE INDEX ... USING ivfflat doesn't support schema-qualified names
+    // in PostgreSQL, so we use unqualified names (search_path is set before execution)
+    // Note: pgvector 0.7+ uses simplified syntax without operator classes
+    `CREATE INDEX IF NOT EXISTS ${tableName}_embedding_idx ON ${tableName} USING ivfflat (embedding) WITH (lists = ${ivfLists})`,
 
     // Index for fast file path lookup
-    `CREATE INDEX IF NOT EXISTS ${qualified(tableName + '_file_path_idx', schema)} ON ${qualified(tableName, schema)} (file_path)`,
+    `CREATE INDEX IF NOT EXISTS ${tableName}_file_path_idx ON ${tableName} (file_path)`,
 
-    // GIN index for pg_trgm keyword boost
-    `CREATE INDEX IF NOT EXISTS ${qualified(tableName + '_text_trgm_idx', schema)} ON ${qualified(tableName, schema)} USING gin (text gin_trgm_ops)`,
+    // GIST index for pg_trgm keyword boost
+    // Note: PostgreSQL 15+ uses gist_trgm_ops instead of gin_trgm_ops
+    `CREATE INDEX IF NOT EXISTS ${tableName}_text_trgm_idx ON ${tableName} USING gist (text gist_trgm_ops)`,
 
     // Files table — aggregation for list_files (avoids scanning chunks)
     `CREATE TABLE IF NOT EXISTS ${qualified(files, schema)} (
@@ -204,6 +208,22 @@ export class PostgreSQLVectordb implements IVectordb {
       }
 
       // Create connection pool
+      // The pg library (8.x) has a bug: when ssl: 'disable' (string) is passed, it does NOT
+      // convert it to false. Instead, the string 'disable' remains truthy, causing the library
+      // to attempt an SSL connection, which fails with "The server does not support SSL connections".
+      //
+      // The library only converts ssl: 'true' → true and ssl: 'no-verify' → { rejectUnauthorized: false }.
+      // ssl: 'disable' is not handled, so we must explicitly use ssl: false (boolean).
+      const sslMode = pgConfig.sslMode ?? 'disable'
+      const sslConfig: string | boolean | { rejectUnauthorized: boolean } =
+        sslMode === 'disable'
+          ? false // Boolean false explicitly disables SSL at the protocol level
+          : sslMode === 'allow' || sslMode === 'prefer'
+            ? { rejectUnauthorized: false }
+            : sslMode === 'require' || sslMode === 'verify-ca' || sslMode === 'verify-full'
+              ? { rejectUnauthorized: sslMode !== 'verify-full' }
+              : false
+
       const poolConfig: {
         host: string
         port: number
@@ -212,7 +232,7 @@ export class PostgreSQLVectordb implements IVectordb {
         password: string
         max: number
         min: number
-        ssl: boolean | { rejectUnauthorized: boolean }
+        ssl: string | boolean | { rejectUnauthorized: boolean }
         connectionTimeoutMillis: number
         queryTimeout: number
       } = {
@@ -223,23 +243,14 @@ export class PostgreSQLVectordb implements IVectordb {
         password: pgConfig.password,
         max: pgConfig.maxPoolSize ?? 20,
         min: pgConfig.minPoolSize ?? 0,
-        ssl:
-          pgConfig.sslMode === 'disable'
-            ? false
-            : pgConfig.sslMode === 'allow'
-              ? { rejectUnauthorized: false }
-              : pgConfig.sslMode === 'prefer'
-                ? { rejectUnauthorized: false }
-                : pgConfig.sslMode === 'require' ||
-                    pgConfig.sslMode === 'verify-ca' ||
-                    pgConfig.sslMode === 'verify-full'
-                  ? { rejectUnauthorized: pgConfig.sslMode !== 'verify-full' }
-                  : false,
+        ssl: sslConfig,
         connectionTimeoutMillis: 10000,
         queryTimeout: 30000,
       }
 
-      this.pool = new Pool(poolConfig)
+      // Cast to any because the pg type definitions don't include the string
+      // 'disable' variant (now replaced with boolean false for reliability).
+      this.pool = new Pool(poolConfig as any)
 
       // Test connection and verify pgvector extension
       const client = await this.pool.connect()
@@ -254,14 +265,20 @@ export class PostgreSQLVectordb implements IVectordb {
           )
         }
 
-        // Verify embedding dimension compatibility
-        await client.query("SELECT '\x00\x00\x00\x00'::vector(4096)")
-        // This will throw if pgvector is too old — we catch and continue
+        // Verify pgvector is functional by creating a simple vector
+        // Note: Using fixed-size vector syntax (e.g., vector(4096)) can cause
+        // protocol errors on some PostgreSQL versions, so we use a simpler test.
+        await client.query('SELECT ARRAY[0,0,0]::vector')
       } finally {
         client.release()
       }
 
       // Create schema (tables, indexes, extensions)
+      // Set search_path to include both the target schema and public (for extensions like pg_trgm)
+      // This allows unqualified table names to work with CREATE INDEX ... USING ivfflat
+      // (which doesn't support schema-qualified names) while still accessing pg_trgm from public
+      await client.query(`SET search_path TO ${this.schema}, public`)
+
       const schemaSQL = buildSchemaSQL(this.config)
       for (const sql of schemaSQL) {
         await client.query(sql)

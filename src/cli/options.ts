@@ -138,6 +138,13 @@ export interface ParsedGlobalResult {
   remainingArgs: string[]
 }
 
+/**
+ * Vector database backend selection.
+ * - `lancedb`: File-based vector database (default)
+ * - `postgresql`: PostgreSQL with pgvector extension
+ */
+export type VectordbBackend = 'lancedb' | 'postgresql'
+
 export interface ResolvedGlobalConfig {
   dbPath: string
   cacheDir: string
@@ -153,6 +160,12 @@ export interface ResolvedGlobalConfig {
    * Should match the model loaded on the llama.cpp server.
    */
   llamaCppModel?: string
+  /**
+   * Vector database backend.
+   * - `lancedb`: File-based vector database (default)
+   * - `postgresql`: PostgreSQL with pgvector extension
+   */
+  vectordbBackend?: VectordbBackend
 }
 
 // ============================================
@@ -279,6 +292,27 @@ export function parseGlobalOptions(args: string[]): ParsedGlobalResult {
 // ============================================
 
 /**
+ * Parse VECTORDB_BACKEND value with validation.
+ * Returns undefined for invalid values (caller decides fallback).
+ */
+export function parseVectordbBackend(value: string | undefined): {
+  value: VectordbBackend | undefined
+  warning?: string
+} {
+  if (!value || value.trim() === '') {
+    return { value: undefined }
+  }
+  const trimmed = value.trim().toLowerCase()
+  if (trimmed !== 'lancedb' && trimmed !== 'postgresql') {
+    return {
+      value: undefined,
+      warning: `Invalid VECTORDB_BACKEND value: "${value.slice(0, 100)}". Expected "lancedb" or "postgresql".`,
+    }
+  }
+  return { value: trimmed as VectordbBackend }
+}
+
+/**
  * Resolve global config with priority: CLI flags > environment variables > defaults.
  * Validates all resolved values before returning.
  */
@@ -291,6 +325,12 @@ export function resolveGlobalConfig(options: GlobalOptions): ResolvedGlobalConfi
     (process.env['EMBEDDING_BACKEND'] as EmbeddingBackend | undefined) ??
     'transformers'
   const llamaCppModel = options.llamaCppModel ?? process.env['LLAMA_CPP_MODEL']
+
+  // Parse VECTORDB_BACKEND with validation
+  const vectordbBackendResult = parseVectordbBackend(process.env['VECTORDB_BACKEND'])
+  if (vectordbBackendResult.warning) {
+    console.warn(vectordbBackendResult.warning)
+  }
 
   // Validate paths
   const dbPathError = validatePath(dbPath, '--db-path')
@@ -312,10 +352,13 @@ export function resolveGlobalConfig(options: GlobalOptions): ResolvedGlobalConfi
     process.exit(1)
   }
 
-  // Build result (exactOptionalPropertyTypes compliance: only include llamaCppModel when defined)
+  // Build result (exactOptionalPropertyTypes compliance: only include optional fields when defined)
   const result: ResolvedGlobalConfig = { dbPath, cacheDir, modelName, embeddingBackend }
   if (llamaCppModel !== undefined) {
     result.llamaCppModel = llamaCppModel
+  }
+  if (vectordbBackendResult.value !== undefined) {
+    result.vectordbBackend = vectordbBackendResult.value
   }
   return result
 }
