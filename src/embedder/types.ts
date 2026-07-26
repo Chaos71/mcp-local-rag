@@ -27,6 +27,14 @@ export interface LlamaCppConfig {
   batchSize?: number
 
   /**
+   * Delay in milliseconds between requests within a batch.
+   * This prevents rate limiting (HTTP 429) on servers with low throughput.
+   * Set to 0 for no delay (parallel processing).
+   * Default: 1000 (1 second between requests)
+   */
+  batchInterval?: number
+
+  /**
    * Request timeout in milliseconds.
    * Default: 30000
    */
@@ -38,6 +46,18 @@ export interface LlamaCppConfig {
    * Default: `nomic-embed-text`
    */
   model?: string
+
+  /**
+   * Maximum number of retry attempts for rate-limited requests (HTTP 429).
+   * Default: 5
+   */
+  maxRetries?: number
+
+  /**
+   * Base delay in milliseconds for retry backoff (exponential with jitter).
+   * Default: 2000
+   */
+  retryBaseDelay?: number
 }
 
 /**
@@ -46,8 +66,11 @@ export interface LlamaCppConfig {
 export const LLAMA_CPP_DEFAULTS = {
   serverUrl: 'http://127.0.0.1:8080',
   batchSize: 16,
+  batchInterval: 1000,
   timeout: 30000,
   model: 'nomic-embed-text',
+  maxRetries: 5,
+  retryBaseDelay: 2000,
 } as const
 
 /**

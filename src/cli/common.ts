@@ -68,9 +68,16 @@ export function createEmbedder(config: ResolvedGlobalConfig): IEmbedder {
     // Model name: CLI flag > env var > default
     const llamaCppModel = config.llamaCppModel ?? process.env['LLAMA_CPP_MODEL']
 
+    // Read batch interval from environment variable with fallback
+    const envBatchInterval = process.env['LLAMA_CPP_BATCH_INTERVAL']
+    const parsedBatchInterval = envBatchInterval ? Number.parseInt(envBatchInterval, 10) : NaN
+    const batchInterval =
+      !Number.isNaN(parsedBatchInterval) && parsedBatchInterval >= 0 ? parsedBatchInterval : 1000 // Default: 1 second between requests to avoid rate limiting
+
     const llamaCppConfig: LlamaCppConfig = {
       serverUrl,
       batchSize: parseInt(process.env['LLAMA_CPP_BATCH_SIZE'] ?? '16', 10) || 16,
+      batchInterval,
       timeout: parseInt(process.env['LLAMA_CPP_TIMEOUT'] ?? '30000', 10) || 30000,
     }
     // Only set model when defined (exactOptionalPropertyTypes compliance)

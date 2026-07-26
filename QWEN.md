@@ -103,6 +103,9 @@ src/
 | `LLAMA_CPP_SERVER_URL` | `http://127.0.0.1:8080` | URL сервера llama.cpp |
 | `LLAMA_CPP_BATCH_SIZE` | `16` | Размер батча для llama.cpp (1–128) |
 | `LLAMA_CPP_TIMEOUT` | `30000` | Таймаут запроса llama.cpp (мс) |
+| `LLAMA_CPP_MAX_RETRIES` | `5` | Максимум повторных попыток при HTTP 429 (Too Many Requests) |
+| `LLAMA_CPP_RETRY_BASE_DELAY` | `2000` | Базовая задержка между повторными попытками (мс, экспоненциальный backoff) |
+| `LLAMA_CPP_BATCH_INTERVAL` | `1000` | Интервал между запросами к серверу llama.cpp (мс). Помогает избежать rate limiting при высокой нагрузке. |
 | `RAG_LLAMA_CPP_DIMENSIONS` | `4096` | Размерность эмбеддингов llama.cpp (переопределение) |
 | `VECTORDB_BACKEND` | `lancedb` | Бэкенд векторной БД: `lancedb` или `postgresql` |
 | `PG_HOST` | `localhost` | Хост PostgreSQL-сервера |

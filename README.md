@@ -596,6 +596,7 @@ For users who want to leverage modern embedding models available only in GGUF fo
 | `EMBEDDING_BACKEND` | `--embedding-backend` | `transformers` | Backend: `transformers` or `llama-cpp` |
 | `LLAMA_CPP_SERVER_URL` | — | `http://127.0.0.1:8080` | llama.cpp server URL |
 | `LLAMA_CPP_BATCH_SIZE` | — | `16` | Batch size for requests (1–128) |
+| `LLAMA_CPP_BATCH_INTERVAL` | — | `1000` | Interval between requests to llama.cpp server (ms). Helps avoid rate limiting under high load. |
 | `LLAMA_CPP_TIMEOUT` | — | `30000` | Request timeout in milliseconds (1000–300000) |
 | `RAG_LLAMA_CPP_DIMENSIONS` | — | `4096` | Override embedding dimensions (for non-Qwen3 models) |
 

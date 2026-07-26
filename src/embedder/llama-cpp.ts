@@ -79,11 +79,37 @@ export class LlamaCppEmbedder implements IEmbedder {
       throw new LlamaCppError('Configuration is required for llama.cpp backend')
     }
 
+    // Read retry configuration from environment variables with fallback to config
+    const envMaxRetries = process.env['LLAMA_CPP_MAX_RETRIES']
+    const parsedMaxRetries = envMaxRetries ? Number.parseInt(envMaxRetries, 10) : NaN
+    const maxRetries =
+      !Number.isNaN(parsedMaxRetries) && parsedMaxRetries > 0
+        ? parsedMaxRetries
+        : (config.maxRetries ?? LLAMA_CPP_DEFAULTS.maxRetries)
+
+    const envRetryDelay = process.env['LLAMA_CPP_RETRY_BASE_DELAY']
+    const parsedRetryDelay = envRetryDelay ? Number.parseInt(envRetryDelay, 10) : NaN
+    const retryBaseDelay =
+      !Number.isNaN(parsedRetryDelay) && parsedRetryDelay > 0
+        ? parsedRetryDelay
+        : (config.retryBaseDelay ?? LLAMA_CPP_DEFAULTS.retryBaseDelay)
+
+    // Read batch interval from environment variable with fallback to config
+    const envBatchInterval = process.env['LLAMA_CPP_BATCH_INTERVAL']
+    const parsedBatchInterval = envBatchInterval ? Number.parseInt(envBatchInterval, 10) : NaN
+    const batchInterval =
+      !Number.isNaN(parsedBatchInterval) && parsedBatchInterval >= 0
+        ? parsedBatchInterval
+        : (config.batchInterval ?? LLAMA_CPP_DEFAULTS.batchInterval)
+
     this.config = {
       serverUrl: config.serverUrl ?? LLAMA_CPP_DEFAULTS.serverUrl,
       batchSize: config.batchSize ?? LLAMA_CPP_DEFAULTS.batchSize,
+      batchInterval,
       timeout: config.timeout ?? LLAMA_CPP_DEFAULTS.timeout,
       model: config.model ?? LLAMA_CPP_DEFAULTS.model,
+      maxRetries,
+      retryBaseDelay,
     }
 
     this.modelName = this.config.model
@@ -132,9 +158,59 @@ export class LlamaCppEmbedder implements IEmbedder {
   }
 
   /**
+   * Execute a single embedding request without retry logic.
+   *
+   * @param text - Text to embed
+   * @returns Embedding vector
+   * @throws LlamaCppError on non-429 HTTP errors or invalid responses
+   */
+  private async performEmbed(text: string): Promise<number[]> {
+    const requestBody: LlamaCppEmbedRequest = { model: this.modelName, input: text }
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), this.config.timeout)
+
+    const response = await fetch(`${this.config.serverUrl}/v1/embeddings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '(unable to read error body)')
+      throw new LlamaCppError(`llama.cpp server returned HTTP ${response.status}: ${errorBody}`)
+    }
+
+    const data: LlamaCppEmbedResponse = await response.json()
+
+    // OpenAI-compatible response: embeddings are in data[0].embedding
+    if (!data.data || !Array.isArray(data.data) || data.data.length === 0) {
+      throw new LlamaCppError(
+        'Invalid response format from llama.cpp server: missing or invalid "data" field'
+      )
+    }
+
+    const embeddingData = data.data[0]
+    if (!embeddingData) {
+      throw new LlamaCppError('Invalid response format from llama.cpp server: data[0] is undefined')
+    }
+    if (!embeddingData.embedding || !Array.isArray(embeddingData.embedding)) {
+      throw new LlamaCppError(
+        'Invalid response format from llama.cpp server: missing or invalid "embedding" field in data[0]'
+      )
+    }
+
+    return embeddingData.embedding
+  }
+
+  /**
    * Generate embedding vector for a single text.
    *
    * Uses the OpenAI-compatible /v1/embeddings endpoint provided by llama.cpp.
+   * Includes exponential backoff retry for HTTP 429 (Too Many Requests) errors.
    *
    * @param text - Text to embed
    * @returns Embedding vector
@@ -144,67 +220,55 @@ export class LlamaCppEmbedder implements IEmbedder {
       throw new EmbeddingError('Cannot generate embedding for empty text')
     }
 
-    const requestBody: LlamaCppEmbedRequest = { model: this.modelName, input: text }
+    let lastError: Error | null = null
 
-    try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), this.config.timeout)
+    for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
+      try {
+        return await this.performEmbed(text)
+      } catch (error) {
+        if (!(error instanceof LlamaCppError)) {
+          // Non-LlamaCppError: connection errors, etc. — do not retry
+          if (error instanceof TypeError && error.message.includes('fetch')) {
+            throw new LlamaCppServerUnavailableError(this.config.serverUrl, error as Error)
+          }
+          throw new LlamaCppError(
+            `Failed to generate embedding: ${(error as Error).message}`,
+            error as Error
+          )
+        }
 
-      const response = await fetch(`${this.config.serverUrl}/v1/embeddings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal,
-      })
+        // Check if this is a rate-limit error (HTTP 429)
+        const statusText = error.message.match(/HTTP (\d+)/)?.[1]
+        if (statusText === '429' && attempt < this.config.maxRetries) {
+          // Exponential backoff with jitter
+          const baseDelay = this.config.retryBaseDelay
+          const jitter = Math.random() * 500
+          const delay = baseDelay * 2 ** attempt + jitter
 
-      clearTimeout(timeoutId)
+          console.warn(
+            `[llama-cpp] Rate limited (429). Retry ${attempt + 1}/${this.config.maxRetries} after ${Math.round(delay)}ms`
+          )
 
-      if (!response.ok) {
-        const errorBody = await response.text().catch(() => '(unable to read error body)')
-        throw new LlamaCppError(`llama.cpp server returned HTTP ${response.status}: ${errorBody}`)
-      }
+          await new Promise((resolve) => setTimeout(resolve, delay))
+          lastError = error
+          continue
+        }
 
-      const data: LlamaCppEmbedResponse = await response.json()
-
-      // OpenAI-compatible response: embeddings are in data[0].embedding
-      if (!data.data || !Array.isArray(data.data) || data.data.length === 0) {
-        throw new LlamaCppError(
-          'Invalid response format from llama.cpp server: missing or invalid "data" field'
-        )
-      }
-
-      const embeddingData = data.data[0]
-      if (!embeddingData) {
-        throw new LlamaCppError(
-          'Invalid response format from llama.cpp server: data[0] is undefined'
-        )
-      }
-      if (!embeddingData.embedding || !Array.isArray(embeddingData.embedding)) {
-        throw new LlamaCppError(
-          'Invalid response format from llama.cpp server: missing or invalid "embedding" field in data[0]'
-        )
-      }
-
-      return embeddingData.embedding
-    } catch (error) {
-      if (error instanceof LlamaCppError) {
+        // Non-retryable error or max retries exceeded
         throw error
       }
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        throw new LlamaCppServerUnavailableError(this.config.serverUrl, error as Error)
-      }
-      throw new LlamaCppError(
-        `Failed to generate embedding: ${(error as Error).message}`,
-        error as Error
-      )
     }
+
+    // Should not reach here, but TypeScript needs it
+    throw lastError ?? new LlamaCppError('Max retries exceeded without error')
   }
 
   /**
    * Generate embedding vectors for multiple texts.
    *
    * llama.cpp does not support batched inference via HTTP, so requests
-   * are processed sequentially in groups of batchSize.
+   * are processed sequentially with configurable intervals to avoid
+   * rate limiting (HTTP 429).
    *
    * @param texts - Array of texts to embed
    * @returns Array of embedding vectors
@@ -220,12 +284,15 @@ export class LlamaCppEmbedder implements IEmbedder {
     }
 
     const results: number[][] = []
-    const batchSize = this.config.batchSize
+    const batchInterval = this.config.batchInterval
 
-    for (let i = 0; i < texts.length; i += batchSize) {
-      const batch = texts.slice(i, i + batchSize)
-      const batchResults = await Promise.all(batch.map((text) => this.embed(text)))
-      results.push(...batchResults)
+    for (let i = 0; i < texts.length; i++) {
+      if (i > 0 && batchInterval > 0) {
+        // Wait between requests to avoid rate limiting
+        await new Promise((resolve) => setTimeout(resolve, batchInterval))
+      }
+      const embedding = await this.embed(texts[i]!)
+      results.push(embedding)
     }
 
     return results

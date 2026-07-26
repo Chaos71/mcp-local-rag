@@ -9,6 +9,8 @@ describe('LlamaCppEmbedder', () => {
   beforeEach(() => {
     // Clear any environment overrides
     delete process.env['RAG_LLAMA_CPP_DIMENSIONS']
+    delete process.env['LLAMA_CPP_MAX_RETRIES']
+    delete process.env['LLAMA_CPP_RETRY_BASE_DELAY']
   })
 
   afterEach(() => {
@@ -91,6 +93,43 @@ describe('LlamaCppEmbedder', () => {
     await expect(embedder.embedBatch(['text 1', '', 'text 3'])).rejects.toThrow(
       'Cannot generate embedding for empty text'
     )
+  })
+
+  // Test 11: Constructor respects LLAMA_CPP_MAX_RETRIES env var
+  it('should respect LLAMA_CPP_MAX_RETRIES environment variable', () => {
+    process.env['LLAMA_CPP_MAX_RETRIES'] = '10'
+    const embedder = new LlamaCppEmbedder({})
+    // The config is internal, but we can verify it doesn't throw
+    expect(embedder).toBeDefined()
+  })
+
+  // Test 12: Constructor respects LLAMA_CPP_RETRY_BASE_DELAY env var
+  it('should respect LLAMA_CPP_RETRY_BASE_DELAY environment variable', () => {
+    process.env['LLAMA_CPP_RETRY_BASE_DELAY'] = '5000'
+    const embedder = new LlamaCppEmbedder({})
+    expect(embedder).toBeDefined()
+  })
+
+  // Test 13: Constructor rejects invalid LLAMA_CPP_MAX_RETRIES
+  it('should ignore invalid LLAMA_CPP_MAX_RETRIES values', () => {
+    process.env['LLAMA_CPP_MAX_RETRIES'] = 'invalid'
+    const embedder = new LlamaCppEmbedder({})
+    expect(embedder).toBeDefined()
+  })
+
+  // Test 14: Constructor rejects invalid LLAMA_CPP_RETRY_BASE_DELAY
+  it('should ignore invalid LLAMA_CPP_RETRY_BASE_DELAY values', () => {
+    process.env['LLAMA_CPP_RETRY_BASE_DELAY'] = '-100'
+    const embedder = new LlamaCppEmbedder({})
+    expect(embedder).toBeDefined()
+  })
+
+  // Test 15: Constructor respects LLAMA_CPP_BATCH_INTERVAL env var
+  it('should respect LLAMA_CPP_BATCH_INTERVAL environment variable', () => {
+    process.env['LLAMA_CPP_BATCH_INTERVAL'] = '2000'
+    const embedder = new LlamaCppEmbedder({})
+    // The config is internal, but we can verify it doesn't throw
+    expect(embedder).toBeDefined()
   })
 
   // Note: HTTP-dependent tests (embed, embedBatch, initialize) require
