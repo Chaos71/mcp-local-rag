@@ -62,8 +62,51 @@ export function createVectorStore(config: ResolvedGlobalConfig): VectorStore | P
       schema: process.env['PG_SCHEMA'] ?? 'public',
     }
 
-    const embeddingDimension =
-      Number.parseInt(process.env['RAG_EMBEDDING_DIMENSIONS'] ?? '384', 10) || 384
+    // Select embedding dimension based on the selected embedding backend.
+    // When using llama.cpp the model produces embeddings of a different
+    // dimensionality (typically 4096 for Qwen3-Embedding-4B) than the
+    // Transformers.js default (384 for all-MiniLM-L6-v2).
+    //
+    // Precedence (llama-cpp):
+    //   1. RAG_LLAMA_CPP_DIMENSIONS env var
+    //   2. RAG_EMBEDDING_DIMENSIONS env var (backward compat)
+    //   3. 4096 (llama.cpp default)
+    //
+    // Precedence (transformers):
+    //   1. RAG_EMBEDDING_DIMENSIONS env var
+    //   2. 384 (Transformers.js default)
+    //
+    // This keeps the PostgreSQL table column in sync with the embedder.
+    const defaultTransformerDim = 384
+    const defaultLlamaCppDim = 4096
+    const defaultDim =
+      config.embeddingBackend === 'llama-cpp' ? defaultLlamaCppDim : defaultTransformerDim
+
+    // Try RAG_LLAMA_CPP_DIMENSIONS first (llama-cpp only), then RAG_EMBEDDING_DIMENSIONS,
+    // then the backend-specific default.
+    const llamaDims = process.env['RAG_LLAMA_CPP_DIMENSIONS']
+    const envDims = process.env['RAG_EMBEDDING_DIMENSIONS']
+
+    let embeddingDimension: number
+    if (config.embeddingBackend === 'llama-cpp' && llamaDims) {
+      const parsed = Number.parseInt(llamaDims, 10)
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        embeddingDimension = parsed
+      } else {
+        // Invalid RAG_LLAMA_CPP_DIMENSIONS — fall back to RAG_EMBEDDING_DIMENSIONS
+        if (envDims) {
+          const fbParsed = Number.parseInt(envDims, 10)
+          embeddingDimension = !Number.isNaN(fbParsed) && fbParsed > 0 ? fbParsed : defaultDim
+        } else {
+          embeddingDimension = defaultDim
+        }
+      }
+    } else if (envDims) {
+      const parsed = Number.parseInt(envDims, 10)
+      embeddingDimension = !Number.isNaN(parsed) && parsed > 0 ? parsed : defaultDim
+    } else {
+      embeddingDimension = defaultDim
+    }
     const ivfLists = Number.parseInt(process.env['RAG_IVF_LISTS'] ?? '100', 10) || 100
     const hybridWeight = parseFloat(process.env['RAG_HYBRID_WEIGHT'] ?? '0.6') || 0.6
 

@@ -139,6 +139,188 @@ describe('cli/common', () => {
         delete process.env['RAG_HYBRID_WEIGHT']
       }
     })
+
+    it('should use transformer default dimension (384) when embeddingBackend is transformers', () => {
+      // Ensure llama.cpp env vars are not set
+      delete process.env['RAG_LLAMA_CPP_DIMENSIONS']
+      delete process.env['RAG_EMBEDDING_DIMENSIONS']
+
+      process.env['PG_HOST'] = 'pg.example.com'
+      process.env['PG_PORT'] = '5432'
+      process.env['PG_DATABASE'] = 'mydb'
+      process.env['PG_USER'] = 'pguser'
+      process.env['PG_PASSWORD'] = 'pgpass'
+      process.env['PG_SSL_MODE'] = 'disable'
+      process.env['PG_MAX_POOL_SIZE'] = '20'
+      process.env['PG_MIN_POOL_SIZE'] = '0'
+      process.env['PG_SCHEMA'] = 'public'
+      process.env['RAG_IVF_LISTS'] = '100'
+      process.env['RAG_HYBRID_WEIGHT'] = '0.6'
+
+      try {
+        createVectorStore(
+          makeConfig({
+            dbPath: '/data/my-db',
+            vectordbBackend: 'postgresql',
+            embeddingBackend: 'transformers',
+          })
+        )
+
+        expect(mocks.PostgreSQLVectordb).toHaveBeenCalledOnce()
+        expect(mocks.PostgreSQLVectordb).toHaveBeenCalledWith(
+          expect.objectContaining({ embeddingDimension: 384 })
+        )
+      } finally {
+        delete process.env['PG_HOST']
+        delete process.env['PG_PORT']
+        delete process.env['PG_DATABASE']
+        delete process.env['PG_USER']
+        delete process.env['PG_PASSWORD']
+        delete process.env['PG_SSL_MODE']
+        delete process.env['PG_MAX_POOL_SIZE']
+        delete process.env['PG_MIN_POOL_SIZE']
+        delete process.env['PG_SCHEMA']
+        delete process.env['RAG_IVF_LISTS']
+        delete process.env['RAG_HYBRID_WEIGHT']
+      }
+    })
+
+    it('should use llama-cpp default dimension (4096) when embeddingBackend is llama-cpp', () => {
+      // Ensure llama.cpp env vars are not set
+      delete process.env['RAG_LLAMA_CPP_DIMENSIONS']
+      delete process.env['RAG_EMBEDDING_DIMENSIONS']
+
+      process.env['PG_HOST'] = 'pg.example.com'
+      process.env['PG_PORT'] = '5432'
+      process.env['PG_DATABASE'] = 'mydb'
+      process.env['PG_USER'] = 'pguser'
+      process.env['PG_PASSWORD'] = 'pgpass'
+      process.env['PG_SSL_MODE'] = 'disable'
+      process.env['PG_MAX_POOL_SIZE'] = '20'
+      process.env['PG_MIN_POOL_SIZE'] = '0'
+      process.env['PG_SCHEMA'] = 'public'
+      process.env['RAG_IVF_LISTS'] = '100'
+      process.env['RAG_HYBRID_WEIGHT'] = '0.6'
+
+      try {
+        createVectorStore(
+          makeConfig({
+            dbPath: '/data/my-db',
+            vectordbBackend: 'postgresql',
+            embeddingBackend: 'llama-cpp',
+          })
+        )
+
+        expect(mocks.PostgreSQLVectordb).toHaveBeenCalledOnce()
+        expect(mocks.PostgreSQLVectordb).toHaveBeenCalledWith(
+          expect.objectContaining({ embeddingDimension: 4096 })
+        )
+      } finally {
+        delete process.env['PG_HOST']
+        delete process.env['PG_PORT']
+        delete process.env['PG_DATABASE']
+        delete process.env['PG_USER']
+        delete process.env['PG_PASSWORD']
+        delete process.env['PG_SSL_MODE']
+        delete process.env['PG_MAX_POOL_SIZE']
+        delete process.env['PG_MIN_POOL_SIZE']
+        delete process.env['PG_SCHEMA']
+        delete process.env['RAG_IVF_LISTS']
+        delete process.env['RAG_HYBRID_WEIGHT']
+      }
+    })
+
+    it('should prefer RAG_LLAMA_CPP_DIMENSIONS over RAG_EMBEDDING_DIMENSIONS for llama-cpp', () => {
+      process.env['RAG_LLAMA_CPP_DIMENSIONS'] = '2048'
+      process.env['RAG_EMBEDDING_DIMENSIONS'] = '384'
+
+      process.env['PG_HOST'] = 'pg.example.com'
+      process.env['PG_PORT'] = '5432'
+      process.env['PG_DATABASE'] = 'mydb'
+      process.env['PG_USER'] = 'pguser'
+      process.env['PG_PASSWORD'] = 'pgpass'
+      process.env['PG_SSL_MODE'] = 'disable'
+      process.env['PG_MAX_POOL_SIZE'] = '20'
+      process.env['PG_MIN_POOL_SIZE'] = '0'
+      process.env['PG_SCHEMA'] = 'public'
+      process.env['RAG_IVF_LISTS'] = '100'
+      process.env['RAG_HYBRID_WEIGHT'] = '0.6'
+
+      try {
+        createVectorStore(
+          makeConfig({
+            dbPath: '/data/my-db',
+            vectordbBackend: 'postgresql',
+            embeddingBackend: 'llama-cpp',
+          })
+        )
+
+        expect(mocks.PostgreSQLVectordb).toHaveBeenCalledOnce()
+        expect(mocks.PostgreSQLVectordb).toHaveBeenCalledWith(
+          expect.objectContaining({ embeddingDimension: 2048 })
+        )
+      } finally {
+        delete process.env['RAG_LLAMA_CPP_DIMENSIONS']
+        delete process.env['RAG_EMBEDDING_DIMENSIONS']
+        delete process.env['PG_HOST']
+        delete process.env['PG_PORT']
+        delete process.env['PG_DATABASE']
+        delete process.env['PG_USER']
+        delete process.env['PG_PASSWORD']
+        delete process.env['PG_SSL_MODE']
+        delete process.env['PG_MAX_POOL_SIZE']
+        delete process.env['PG_MIN_POOL_SIZE']
+        delete process.env['PG_SCHEMA']
+        delete process.env['RAG_IVF_LISTS']
+        delete process.env['RAG_HYBRID_WEIGHT']
+      }
+    })
+
+    it('should fall back to RAG_EMBEDDING_DIMENSIONS when RAG_LLAMA_CPP_DIMENSIONS is invalid for llama-cpp', () => {
+      process.env['RAG_LLAMA_CPP_DIMENSIONS'] = 'invalid'
+      process.env['RAG_EMBEDDING_DIMENSIONS'] = '768'
+
+      process.env['PG_HOST'] = 'pg.example.com'
+      process.env['PG_PORT'] = '5432'
+      process.env['PG_DATABASE'] = 'mydb'
+      process.env['PG_USER'] = 'pguser'
+      process.env['PG_PASSWORD'] = 'pgpass'
+      process.env['PG_SSL_MODE'] = 'disable'
+      process.env['PG_MAX_POOL_SIZE'] = '20'
+      process.env['PG_MIN_POOL_SIZE'] = '0'
+      process.env['PG_SCHEMA'] = 'public'
+      process.env['RAG_IVF_LISTS'] = '100'
+      process.env['RAG_HYBRID_WEIGHT'] = '0.6'
+
+      try {
+        createVectorStore(
+          makeConfig({
+            dbPath: '/data/my-db',
+            vectordbBackend: 'postgresql',
+            embeddingBackend: 'llama-cpp',
+          })
+        )
+
+        expect(mocks.PostgreSQLVectordb).toHaveBeenCalledOnce()
+        expect(mocks.PostgreSQLVectordb).toHaveBeenCalledWith(
+          expect.objectContaining({ embeddingDimension: 768 })
+        )
+      } finally {
+        delete process.env['RAG_LLAMA_CPP_DIMENSIONS']
+        delete process.env['RAG_EMBEDDING_DIMENSIONS']
+        delete process.env['PG_HOST']
+        delete process.env['PG_PORT']
+        delete process.env['PG_DATABASE']
+        delete process.env['PG_USER']
+        delete process.env['PG_PASSWORD']
+        delete process.env['PG_SSL_MODE']
+        delete process.env['PG_MAX_POOL_SIZE']
+        delete process.env['PG_MIN_POOL_SIZE']
+        delete process.env['PG_SCHEMA']
+        delete process.env['RAG_IVF_LISTS']
+        delete process.env['RAG_HYBRID_WEIGHT']
+      }
+    })
   })
 
   describe('formatCliError', () => {
