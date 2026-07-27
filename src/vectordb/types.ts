@@ -309,8 +309,12 @@ export interface PostgreSQLVectorStoreConfig {
   maxFiles?: number
   /** Embedding dimension (default: 384 for all-MiniLM-L6-v2) */
   embeddingDimension?: number
-  /** IVFFlat index lists count (default: 100) */
+  /** IVFFlat index lists count (default: 100). Required only for IVFFlat index. */
   ivfLists?: number
+  /** Use HNSW index instead of IVFFlat (default: false, IVFFlat used when dimension <= 2000) */
+  useHNSWIndex?: boolean
+  /** Schema name (default: 'public') — used for multi-tenant scenarios */
+  schema?: string
 }
 
 /** Default PostgreSQL schema */
@@ -341,6 +345,8 @@ export type VectorStoreConfig =
       maxFiles?: number
       embeddingDimension?: number
       ivfLists?: number
+      useHNSWIndex?: boolean
+      schema?: string
     }
 
 // ============================================

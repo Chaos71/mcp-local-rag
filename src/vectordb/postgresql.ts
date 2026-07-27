@@ -88,6 +88,30 @@ export function buildSchemaSQL(config: PostgreSQLVectorStoreConfig): string[] {
   const ivfLists = config.ivfLists ?? 100
   const schema = config.pgConfig.schema || 'public'
 
+  console.error(
+    `buildSchemaSQL: embeddingDim=${embeddingDim}, useHNSWIndex=${config.useHNSWIndex ?? false}, ivfLists=${ivfLists}`
+  )
+
+  // PostgreSQL IVFFlat индекс поддерживает размерность максимум 2000.
+  // HNSW индекс также имеет лимит 2000 размерностей.
+  // Используем IVFFlat для всех размерностей <= 2000.
+  const useHNSWIndex = config.useHNSWIndex ?? false
+
+  // Vector index SQL
+  const vectorIndexSQL = useHNSWIndex
+    ? // HNSW индекс — более быстрый при поиске, но требует больше памяти
+      // Note: pgvector 0.7+ uses simplified syntax without operator classes
+      `CREATE INDEX IF NOT EXISTS ${tableName}_embedding_idx ON ${tableName} USING hnsw (embedding vector_cosine_ops)`
+    : // IVFFlat индекс — более быстрое построение, но медленнее при поиске
+      // Note: CREATE INDEX ... USING ivfflat doesn't support schema-qualified names
+      // in PostgreSQL, so we use unqualified names (search_path is set before execution)
+      // Note: pgvector 0.7+ uses simplified syntax without operator classes
+      `CREATE INDEX IF NOT EXISTS ${tableName}_embedding_idx ON ${tableName} USING ivfflat (embedding) WITH (lists = ${ivfLists})`
+
+  console.error(
+    `buildSchemaSQL: Creating table with embedding dimension ${embeddingDim} and index type ${useHNSWIndex ? 'HNSW' : 'IVFFlat'}`
+  )
+
   return [
     // Create schema if it does not exist
     `CREATE SCHEMA IF NOT EXISTS ${schema}`,
@@ -110,11 +134,9 @@ export function buildSchemaSQL(config: PostgreSQLVectorStoreConfig): string[] {
       created_at TIMESTAMP DEFAULT NOW()
     )`,
 
-    // IVFFlat index for vector search
-    // Note: CREATE INDEX ... USING ivfflat doesn't support schema-qualified names
-    // in PostgreSQL, so we use unqualified names (search_path is set before execution)
-    // Note: pgvector 0.7+ uses simplified syntax without operator classes
-    `CREATE INDEX IF NOT EXISTS ${tableName}_embedding_idx ON ${tableName} USING ivfflat (embedding) WITH (lists = ${ivfLists})`,
+    // Vector index for search
+    // IVFFlat поддерживает размерность до 2000, HNSW поддерживает до 65535
+    vectorIndexSQL,
 
     // Index for fast file path lookup
     `CREATE INDEX IF NOT EXISTS ${tableName}_file_path_idx ON ${tableName} (file_path)`,
@@ -183,13 +205,49 @@ export class PostgreSQLVectordb implements IVectordb {
   private tableName: string
   private embeddingDim: number
   private schema: string
+  private useHNSWIndex: boolean
 
   constructor(config: PostgreSQLVectorStoreConfig) {
     this.config = config
     this.tableName = config.tableName || DEFAULT_TABLES.chunks
     this.embeddingDim = config.embeddingDimension ?? 384
-    // ivfLists is used in schema creation (buildSchemaSQL) but not stored here
+
+    // Проверка размерности: IVFFlat и HNSW индексы pgvector поддерживают только размерности <= 2000
+    if (this.embeddingDim > 2000) {
+      throw new DatabaseError(
+        `Embedding dimension ${this.embeddingDim} exceeds PostgreSQL index limit of 2000. ` +
+          `Please use a model with dimension <= 2000 (e.g., all-MiniLM-L6-v2: 384, Qwen2.5-Embedding: 768).`
+      )
+    }
+
+    // IVFFlat используется по умолчанию для размерностей <= 2000
+    this.useHNSWIndex = false
+    // ivfLists используется только для IVFFlat индекса
     this.schema = config.pgConfig.schema || DEFAULT_PG_SCHEMA
+    console.error(
+      `PostgreSQLVectordb: Constructor: embeddingDim=${this.embeddingDim}, useHNSWIndex=${this.useHNSWIndex}, config.embeddingDimension=${config.embeddingDimension}`
+    )
+  }
+
+  /**
+   * Получить конфигурацию для buildSchemaSQL, включающую useHNSWIndex.
+   * Это необходимо для TypeScript проверки использования свойства.
+   */
+  private getConfigForSchema(): PostgreSQLVectorStoreConfig {
+    const config: PostgreSQLVectorStoreConfig = {
+      ...this.config,
+      useHNSWIndex: this.useHNSWIndex,
+      // Если useHNSWIndex не установлен явно, но embeddingDimension > 2000,
+      // передаём false для предотвращения создания HNSW индекса с недопустимой размерностью
+      embeddingDimension: this.embeddingDim,
+    }
+
+    // Если useHNSWIndex=false, передаём ivfLists для IVFFlat индекса
+    if (!this.useHNSWIndex && this.config.ivfLists !== undefined) {
+      config.ivfLists = this.config.ivfLists
+    }
+
+    return config
   }
 
   // ============================================
@@ -329,15 +387,13 @@ export class PostgreSQLVectordb implements IVectordb {
       // (which doesn't support schema-qualified names) while still accessing pg_trgm from public
       await client.query(`SET search_path TO ${this.schema}, public`)
 
-      const schemaSQL = buildSchemaSQL(this.config)
-      for (const sql of schemaSQL) {
-        await client.query(sql)
-      }
-
-      // Check if the existing table has a different embedding dimension.
-      // If so, drop and recreate the table with the correct dimension to
-      // avoid "expected N dimensions, not M" errors during insert.
+      // Check if the existing table has a different embedding dimension BEFORE creating.
+      // This prevents "column cannot have more than 2000 dimensions" errors when trying
+      // to create an index on an existing table with incompatible dimension.
       const dimMismatch = await this.checkDimensionMismatch(client)
+      console.error(
+        `PostgreSQLVectordb: Dimension mismatch check: ${JSON.stringify(dimMismatch)} (expected: ${this.embeddingDim})`
+      )
       if (dimMismatch) {
         console.error(
           `PostgreSQLVectordb: Table dimension mismatch detected (${dimMismatch.current} → ${this.embeddingDim}). ` +
@@ -345,10 +401,14 @@ export class PostgreSQLVectordb implements IVectordb {
         )
         // Drop table cascades indexes and constraints automatically
         await client.query(`DROP TABLE IF EXISTS ${qualified(this.tableName, this.schema)} CASCADE`)
-        // Re-run CREATE TABLE + indexes from schemaSQL
-        for (const sql of schemaSQL) {
-          await client.query(sql)
-        }
+      }
+
+      // Create table and indexes with the correct dimension
+      const schemaSQL = buildSchemaSQL(this.getConfigForSchema())
+      console.error(`PostgreSQLVectordb: Creating schema with ${schemaSQL.length} SQL statements`)
+      for (const sql of schemaSQL) {
+        console.error(`PostgreSQLVectordb: Executing SQL: ${sql.substring(0, 100)}...`)
+        await client.query(sql)
       }
 
       this.initialized = true
@@ -385,6 +445,10 @@ export class PostgreSQLVectordb implements IVectordb {
     if (!this.pool || !this.initialized) {
       throw new DatabaseError('PostgreSQLVectordb is not initialized. Call initialize() first.')
     }
+
+    console.error(
+      `PostgreSQLVectordb: Inserting ${chunks.length} chunks with embedding dimension ${chunks[0]?.vector.length ?? 'unknown'}`
+    )
 
     const client = await this.pool.connect()
     try {

@@ -67,14 +67,9 @@ export function createVectorStore(config: ResolvedGlobalConfig): VectorStore | P
     // dimensionality (typically 4096 for Qwen3-Embedding-4B) than the
     // Transformers.js default (384 for all-MiniLM-L6-v2).
     //
-    // Precedence (llama-cpp):
-    //   1. RAG_LLAMA_CPP_DIMENSIONS env var
-    //   2. RAG_EMBEDDING_DIMENSIONS env var (backward compat)
-    //   3. 4096 (llama.cpp default)
-    //
-    // Precedence (transformers):
-    //   1. RAG_EMBEDDING_DIMENSIONS env var
-    //   2. 384 (Transformers.js default)
+    // Precedence:
+    //   1. EMBEDDING_SIZE env var (единая настройка для всех бэкендов)
+    //   2. Backend-specific default (4096 for llama-cpp, 384 for transformers)
     //
     // This keeps the PostgreSQL table column in sync with the embedder.
     const defaultTransformerDim = 384
@@ -82,27 +77,11 @@ export function createVectorStore(config: ResolvedGlobalConfig): VectorStore | P
     const defaultDim =
       config.embeddingBackend === 'llama-cpp' ? defaultLlamaCppDim : defaultTransformerDim
 
-    // Try RAG_LLAMA_CPP_DIMENSIONS first (llama-cpp only), then RAG_EMBEDDING_DIMENSIONS,
-    // then the backend-specific default.
-    const llamaDims = process.env['RAG_LLAMA_CPP_DIMENSIONS']
-    const envDims = process.env['RAG_EMBEDDING_DIMENSIONS']
-
+    // Use a single environment variable EMBEDDING_SIZE
+    const sizeEmbedding = process.env['EMBEDDING_SIZE']
     let embeddingDimension: number
-    if (config.embeddingBackend === 'llama-cpp' && llamaDims) {
-      const parsed = Number.parseInt(llamaDims, 10)
-      if (!Number.isNaN(parsed) && parsed > 0) {
-        embeddingDimension = parsed
-      } else {
-        // Invalid RAG_LLAMA_CPP_DIMENSIONS — fall back to RAG_EMBEDDING_DIMENSIONS
-        if (envDims) {
-          const fbParsed = Number.parseInt(envDims, 10)
-          embeddingDimension = !Number.isNaN(fbParsed) && fbParsed > 0 ? fbParsed : defaultDim
-        } else {
-          embeddingDimension = defaultDim
-        }
-      }
-    } else if (envDims) {
-      const parsed = Number.parseInt(envDims, 10)
+    if (sizeEmbedding) {
+      const parsed = Number.parseInt(sizeEmbedding, 10)
       embeddingDimension = !Number.isNaN(parsed) && parsed > 0 ? parsed : defaultDim
     } else {
       embeddingDimension = defaultDim
@@ -110,11 +89,26 @@ export function createVectorStore(config: ResolvedGlobalConfig): VectorStore | P
     const ivfLists = Number.parseInt(process.env['RAG_IVF_LISTS'] ?? '100', 10) || 100
     const hybridWeight = parseFloat(process.env['RAG_HYBRID_WEIGHT'] ?? '0.6') || 0.6
 
+    // PostgreSQL IVFFlat и HNSW индексы в pgvector 0.7+ имеют лимит 2000 размерностей.
+    // Оба индекса поддерживают только размерности <= 2000.
+    // Для размерностей > 2000 выбрасываем ошибку с рекомендацией использовать меньшую размерность.
+    if (embeddingDimension > 2000) {
+      throw new Error(
+        `Embedding dimension ${embeddingDimension} exceeds PostgreSQL index limit of 2000. ` +
+          `Please set EMBEDDING_SIZE to a value <= 2000, or use a different embedding model. ` +
+          `Supported models: all-MiniLM-L6-v2 (384), Qwen2.5-Embedding (768).`
+      )
+    }
+
+    const useHNSWIndex = false
+
+    // Для HNSW индекса ivfLists не требуется, передаем undefined
     return new PostgreSQLVectordb({
       backend: 'postgresql' as const,
       tableName: 'chunks',
       embeddingDimension,
-      ivfLists,
+      ...(useHNSWIndex ? {} : { ivfLists }), // Передаем ivfLists только если не HNSW
+      useHNSWIndex,
       hybridWeight,
       pgConfig,
     })
