@@ -711,8 +711,8 @@ MCP-сервер настраивается только переменными 
 |---------------------|----------|---------|----------|
 | `EMBEDDING_BACKEND` | `--embedding-backend` | `transformers` | Бэкенд: `transformers` или `llama-cpp` |
 | `LLAMA_CPP_SERVER_URL` | — | `http://127.0.0.1:8080` | URL сервера llama.cpp |
-| `LLAMA_CPP_BATCH_SIZE` | — | `16` | Размер батча для запросов (1–128) |
-| `LLAMA_CPP_BATCH_INTERVAL` | — | `1000` | Интервал между запросами к серверу llama.cpp (мс). Помогает избежать rate limiting при высокой нагрузке. |
+| `LLAMA_CPP_BATCH_SIZE` | — | `16` | Размер батча (1–128). Тексты отправляются пакетно одним HTTP-запросом `input: string[]`. |
+| `LLAMA_CPP_BATCH_INTERVAL` | — | `1000` | Интервал между батчами запросов к серверу llama.cpp (мс). Помогает избежать rate limiting при высокой нагрузке. |
 | `LLAMA_CPP_TIMEOUT` | — | `30000` | Таймаут запроса в миллисекундах (1000–300000) |
 | `RAG_LLAMA_CPP_DIMENSIONS` | — | `4096` | Переопределение размерности эмбеддингов (для моделей не-Qwen3) |
 

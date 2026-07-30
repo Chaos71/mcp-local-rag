@@ -20,8 +20,14 @@ export interface LlamaCppConfig {
 
   /**
    * Batch size for embedding requests.
-   * llama.cpp does not support batched inference via HTTP, so this is used
-   * to process requests in smaller groups.
+   * llama.cpp server supports batched embeddings via the OpenAI-compatible
+   * /v1/embeddings endpoint: the request body accepts `input: string[]`,
+   * and the response returns multiple embeddings in a single HTTP call.
+   *
+   * Texts are split into batches of this size. Between batches a
+   * `batchInterval` delay prevents rate limiting (HTTP 429).
+   *
+   * Recommended: 16–64 depending on server capacity and text length.
    * Default: 16
    */
   batchSize?: number

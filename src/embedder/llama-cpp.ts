@@ -266,9 +266,13 @@ export class LlamaCppEmbedder implements IEmbedder {
   /**
    * Generate embedding vectors for multiple texts.
    *
-   * llama.cpp does not support batched inference via HTTP, so requests
-   * are processed sequentially with configurable intervals to avoid
-   * rate limiting (HTTP 429).
+   * llama.cpp server supports batched embeddings via the OpenAI-compatible
+   * /v1/embeddings endpoint: the request body accepts `input: string[]`,
+   * and the response returns multiple embeddings in a single HTTP call.
+   *
+   * Texts are split into batches of `batchSize` (default 16) to avoid
+   * oversized requests. Between batches a configurable `batchInterval`
+   * delay prevents rate limiting (HTTP 429).
    *
    * @param texts - Array of texts to embed
    * @returns Array of embedding vectors
@@ -283,27 +287,96 @@ export class LlamaCppEmbedder implements IEmbedder {
       throw new EmbeddingError('Cannot generate embedding for empty text')
     }
 
-    console.error(`LlamaCppEmbedder: Starting batch of ${texts.length} texts`)
+    console.error(
+      `LlamaCppEmbedder: Starting batch of ${texts.length} texts (batchSize=${this.config.batchSize})`
+    )
 
     const results: number[][] = []
+    const batchSize = this.config.batchSize
     const batchInterval = this.config.batchInterval
 
-    for (let i = 0; i < texts.length; i++) {
+    for (let i = 0; i < texts.length; i += batchSize) {
+      const batch = texts.slice(i, i + batchSize)
+
+      // Wait between batches (not between individual texts within a batch)
       if (i > 0 && batchInterval > 0) {
-        // Wait between requests to avoid rate limiting
         await new Promise((resolve) => setTimeout(resolve, batchInterval))
       }
+
       console.error(
-        `LlamaCppEmbedder: Processing text ${i + 1}/${texts.length} (${texts[i]!.length} chars)`
+        `LlamaCppEmbedder: Sending batch ${Math.floor(i / batchSize) + 1} (${batch.length} texts)`
       )
-      const embedding = await this.embed(texts[i]!)
-      results.push(embedding)
+
+      // Single HTTP request for the entire batch
+      const batchEmbeddings = await this.performBatchEmbed(batch)
+      results.push(...batchEmbeddings)
+
+      console.error(
+        `LlamaCppEmbedder: Batch ${Math.floor(i / batchSize) + 1} done — ${batchEmbeddings.length} embeddings`
+      )
     }
 
     console.error(
       `LlamaCppEmbedder: Batch complete — ${results.length} embeddings generated (${results[0]?.length ?? 0} dims each)`
     )
     return results
+  }
+
+  /**
+   * Send a batch of texts as a single HTTP request and return embeddings.
+   *
+   * The llama.cpp server (via OpenAI-compatible API) accepts `input: string[]`
+   * and returns embeddings for all texts in one response.
+   *
+   * @param batch - Array of texts to embed in a single request
+   * @returns Array of embedding vectors in the same order as input
+   */
+  private async performBatchEmbed(batch: string[]): Promise<number[][]> {
+    const requestBody: LlamaCppEmbedRequest = { model: this.modelName, input: batch }
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), this.config.timeout)
+
+    const response = await fetch(`${this.config.serverUrl}/v1/embeddings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '(unable to read error body)')
+      throw new LlamaCppError(`llama.cpp server returned HTTP ${response.status}: ${errorBody}`)
+    }
+
+    const data: LlamaCppEmbedResponse = await response.json()
+
+    // OpenAI-compatible response: embeddings are in data[].embedding
+    // Sort by index to ensure correct ordering
+    const items: Array<{ embedding: number[]; index?: number }> = data.data as any
+
+    const sorted =
+      typeof items[0]?.index === 'number'
+        ? [...items].sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+        : items
+
+    const embeddings: number[][] = sorted.map((item) => item.embedding)
+
+    // Validate that we got the expected number of embeddings
+    if (embeddings.length !== batch.length) {
+      throw new LlamaCppError(
+        `Response mismatch: requested ${batch.length} embeddings, got ${embeddings.length}`
+      )
+    }
+
+    // Validate all embeddings are valid arrays
+    if (embeddings.some((e) => !Array.isArray(e))) {
+      throw new LlamaCppError('Invalid response: some embeddings are not arrays')
+    }
+
+    return embeddings
   }
 
   /**
