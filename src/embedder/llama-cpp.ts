@@ -220,11 +220,15 @@ export class LlamaCppEmbedder implements IEmbedder {
       throw new EmbeddingError('Cannot generate embedding for empty text')
     }
 
+    const t0 = performance.now()
     let lastError: Error | null = null
 
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
       try {
-        return await this.performEmbed(text)
+        const result = await this.performEmbed(text)
+        const elapsed = performance.now() - t0
+        console.error(`LlamaCppEmbedder: embed() completed in ${elapsed.toFixed(1)}ms`)
+        return result
       } catch (error) {
         if (!(error instanceof LlamaCppError)) {
           // Non-LlamaCppError: connection errors, etc. — do not retry
@@ -287,6 +291,7 @@ export class LlamaCppEmbedder implements IEmbedder {
       throw new EmbeddingError('Cannot generate embedding for empty text')
     }
 
+    const t0 = performance.now()
     console.error(
       `LlamaCppEmbedder: Starting batch of ${texts.length} texts (batchSize=${this.config.batchSize})`
     )
@@ -308,16 +313,19 @@ export class LlamaCppEmbedder implements IEmbedder {
       )
 
       // Single HTTP request for the entire batch
+      const tBatch = performance.now()
       const batchEmbeddings = await this.performBatchEmbed(batch)
       results.push(...batchEmbeddings)
 
+      const batchElapsed = performance.now() - tBatch
       console.error(
-        `LlamaCppEmbedder: Batch ${Math.floor(i / batchSize) + 1} done — ${batchEmbeddings.length} embeddings`
+        `LlamaCppEmbedder: Batch ${Math.floor(i / batchSize) + 1} done — ${batchEmbeddings.length} embeddings in ${batchElapsed.toFixed(1)}ms`
       )
     }
 
+    const elapsed = performance.now() - t0
     console.error(
-      `LlamaCppEmbedder: Batch complete — ${results.length} embeddings generated (${results[0]?.length ?? 0} dims each)`
+      `LlamaCppEmbedder: Batch complete — ${results.length} embeddings in ${elapsed.toFixed(1)}ms (${(elapsed / results.length).toFixed(2)}ms/text)`
     )
     return results
   }

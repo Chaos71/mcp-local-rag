@@ -332,7 +332,10 @@ export class RAGServer {
     // No local catch: any failure propagates with original identity to the
     // central dispatcher mapper (prefix-less context for this tool).
     // Generate query embedding
+    const t0 = performance.now()
     const queryVector = await this.embedder.embed(args.query)
+    const embedTime = performance.now() - t0
+    console.error(`Query: embedding completed in ${embedTime.toFixed(1)}ms`)
 
     // `args.scope` is parser-validated; array-wrap without re-validating, and
     // omit the key when absent (exactOptionalPropertyTypes) to keep the scope-absent path.
@@ -375,6 +378,10 @@ export class RAGServer {
 
     // Append config warnings on every call because MCP clients may hide
     // stderr and may not retain context across calls.
+    const totalTime = performance.now() - t0
+    console.error(
+      `Query: total time ${totalTime.toFixed(1)}ms (embedding: ${embedTime.toFixed(1)}ms, search: ${(totalTime - embedTime).toFixed(1)}ms)`
+    )
     return { content: this.withWarnings(content) }
   }
 
@@ -413,12 +420,17 @@ export class RAGServer {
       const meta = await loadMetaJson(args.filePath)
       title = meta?.title ?? null
       console.error(`Read raw-data file: ${args.filePath} (${text.length} characters)`)
+      const tChunk = performance.now()
       ;({ chunks, embeddings } = await buildChunksAndEmbeddings(text, this.chunker, this.embedder))
+      console.error(
+        `Ingest: chunking+embedding completed in ${(performance.now() - tChunk).toFixed(1)}ms (${chunks.length} chunks)`
+      )
     } else if (visualArg === true && isPdf) {
       // Visual dispatch delegates to `prepareVisualPdfChunks`, which owns
       // the dynamic `pdf-visual` import so the default path does not load
       // visual dependencies. This handler keeps its backup/rollback/
       // optimize/response-shaping persistence semantics.
+      const tChunk = performance.now()
       const visualResult = await prepareVisualPdfChunks(
         args.filePath,
         this.parser,
@@ -434,16 +446,27 @@ export class RAGServer {
       embeddings = visualResult.embeddings
       text = visualResult.text
       title = visualResult.title
+      console.error(
+        `Ingest: visual chunking+embedding completed in ${(performance.now() - tChunk).toFixed(1)}ms (${chunks.length} chunks)`
+      )
     } else if (isPdf) {
       const result = await this.parser.parsePdf(args.filePath, this.embedder)
       text = result.content
       title = result.title || null
+      const tChunk = performance.now()
       ;({ chunks, embeddings } = await buildChunksAndEmbeddings(text, this.chunker, this.embedder))
+      console.error(
+        `Ingest: chunking+embedding completed in ${(performance.now() - tChunk).toFixed(1)}ms (${chunks.length} chunks)`
+      )
     } else {
       const result = await this.parser.parseFile(args.filePath)
       text = result.content
       title = result.title || null
+      const tChunk = performance.now()
       ;({ chunks, embeddings } = await buildChunksAndEmbeddings(text, this.chunker, this.embedder))
+      console.error(
+        `Ingest: chunking+embedding completed in ${(performance.now() - tChunk).toFixed(1)}ms (${chunks.length} chunks)`
+      )
     }
 
     // Fail-fast: Prevent data loss when chunking produces 0 chunks

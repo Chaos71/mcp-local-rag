@@ -342,6 +342,8 @@ export class VectorStore implements IVectordb {
       throw new DatabaseError(`Invalid limit: expected 1-20, got ${limit}`)
     }
 
+    const t0 = performance.now()
+
     try {
       // Step 1: Semantic (vector) search - always the primary search
       const candidateLimit = limit * HYBRID_SEARCH_CANDIDATE_MULTIPLIER
@@ -419,6 +421,11 @@ export class VectorStore implements IVectordb {
       }
 
       // Return top results after all filtering and boosting
+      const elapsed = performance.now() - t0
+      const mode = this.ftsEnabled && queryText && hybridWeight > 0 ? 'hybrid' : 'vector-only'
+      console.error(
+        `VectorStore: search() completed in ${elapsed.toFixed(1)}ms (${mode}, ${results.length} hits)`
+      )
       return results.slice(0, limit)
     } catch (error) {
       throw new DatabaseError('Failed to search vectors', error as Error)

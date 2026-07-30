@@ -355,6 +355,7 @@ export async function ingestSingleFile(
     // joined enriched-page text is taken from the helper to preserve the
     // pre-existing `metadata.fileSize` semantics (post-enrichment,
     // pre-chunking text length).
+    const tVisual = performance.now()
     await vectorStore.deleteChunks(filePath)
     const vectorChunks = buildVectorChunks({
       filePath,
@@ -364,6 +365,9 @@ export async function ingestSingleFile(
       fileTitle: title,
     })
     await vectorStore.insertChunks(vectorChunks)
+    console.error(
+      `  [visual chunk+embed] ${(performance.now() - tVisual).toFixed(1)}ms (${vectorChunks.length} chunks)`
+    )
     return vectorChunks.length
   } else if (isPdf) {
     const result = await parser.parsePdf(filePath, embedder)
@@ -376,11 +380,15 @@ export async function ingestSingleFile(
   }
 
   // Chunk text + generate embeddings via the shared computation layer.
+  const tChunk = performance.now()
   const { chunks, embeddings } = await buildChunksAndEmbeddings(text, chunker, embedder)
   if (chunks.length === 0) {
     console.error(`  Warning: 0 chunks generated (file may be empty or too short)`)
     return 0
   }
+  console.error(
+    `  [chunk+embed] ${(performance.now() - tChunk).toFixed(1)}ms (${chunks.length} chunks)`
+  )
 
   // Delete existing chunks for this file
   await vectorStore.deleteChunks(filePath)

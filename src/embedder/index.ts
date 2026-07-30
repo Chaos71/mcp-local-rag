@@ -249,6 +249,8 @@ export class Embedder implements IEmbedder {
     // Lazy initialization: initialize on first use if not already initialized
     await this.ensureInitialized()
 
+    const t0 = performance.now()
+
     try {
       const options = { pooling: 'mean', normalize: true }
       const modelCall = this.model as (
@@ -259,6 +261,8 @@ export class Embedder implements IEmbedder {
 
       // Access raw data via .data property
       const embedding = Array.from(output.data)
+      const elapsed = performance.now() - t0
+      console.error(`Embedder: embed() completed in ${elapsed.toFixed(1)}ms`)
       return embedding
     } catch (error) {
       if (error instanceof EmbeddingError) {
@@ -291,6 +295,8 @@ export class Embedder implements IEmbedder {
 
     // Lazy initialization: initialize on first use if not already initialized
     await this.ensureInitialized()
+
+    const t0 = performance.now()
 
     try {
       const options = { pooling: 'mean', normalize: true }
@@ -329,6 +335,10 @@ export class Embedder implements IEmbedder {
         }
       }
 
+      const elapsed = performance.now() - t0
+      console.error(
+        `Embedder: embedBatch() completed in ${elapsed.toFixed(1)}ms (${embeddings.length} texts, ${(elapsed / embeddings.length).toFixed(2)}ms/text)`
+      )
       return embeddings
     } catch (error) {
       if (error instanceof EmbeddingError) {

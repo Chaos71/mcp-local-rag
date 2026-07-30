@@ -669,6 +669,8 @@ export class PostgreSQLVectordb implements IVectordb {
       throw new DatabaseError(`Invalid limit: expected 1-20, got ${limit}`)
     }
 
+    const t0 = performance.now()
+
     try {
       // Convert query vector to PostgreSQL vector string format
       const queryVectorStr = `[${queryVector.join(',')}]`
@@ -792,6 +794,11 @@ export class PostgreSQLVectordb implements IVectordb {
       }
 
       // Return top results after all filtering and boosting
+      const elapsed = performance.now() - t0
+      const mode = this.ftsEnabled && queryText && hybridWeight > 0 ? 'hybrid' : 'vector-only'
+      console.error(
+        `PostgreSQLVectordb: search() completed in ${elapsed.toFixed(1)}ms (${mode}, ${results.length} hits)`
+      )
       return results.slice(0, limit)
     } catch (error) {
       throw new DatabaseError('Failed to search vectors', error as Error)
