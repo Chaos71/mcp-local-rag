@@ -28,6 +28,19 @@ import {
 types.setTypeParser(25, (value: string) => value) // text → string
 types.setTypeParser(114, (value: string) => value) // json → string
 
+/**
+ * Register halfvec type parser for pg-driver.
+ * halfvec is returned as a string in array format (e.g., '[0.1,0.2]').
+ * We parse it as a float32 array for internal use.
+ * halfvec OID is 1700 (registered in pgvector >= 0.7.0).
+ */
+types.setTypeParser(1700, (value: string): number[] => {
+  // Parse halfvec string format: '[0.1,0.2,...]'
+  const match = value.match(/^\[(.+)\]$/)
+  if (!match || !match[1]) return []
+  return match[1].split(',').map(Number)
+})
+
 // ============================================
 // PostgreSQL Row Types
 // ============================================
@@ -89,8 +102,13 @@ export function buildSchemaSQL(config: PostgreSQLVectorStoreConfig): string[] {
   const schema = config.pgConfig.schema || 'public'
 
   console.error(
-    `buildSchemaSQL: embeddingDim=${embeddingDim}, useHNSWIndex=${config.useHNSWIndex ?? false}, ivfLists=${ivfLists}`
+    `buildSchemaSQL: embeddingDim=${embeddingDim}, useHNSWIndex=${config.useHNSWIndex ?? false}, useHalfvecIndex=${config.useHalfvecIndex ?? false}, ivfLists=${ivfLists}`
   )
+
+  // halfvec тип поддерживает до 4000 измерений (против 2000 для vector).
+  // При useHalfvecIndex=true используем halfvec для индексации.
+  // halfvec-индекс строится на выражении-приведении: embedding::halfvec(dim)
+  const useHalfvecIndex = config.useHalfvecIndex ?? false
 
   // PostgreSQL IVFFlat индекс поддерживает размерность максимум 2000.
   // HNSW индекс также имеет лимит 2000 размерностей.
@@ -98,18 +116,24 @@ export function buildSchemaSQL(config: PostgreSQLVectorStoreConfig): string[] {
   const useHNSWIndex = config.useHNSWIndex ?? false
 
   // Vector index SQL
-  const vectorIndexSQL = useHNSWIndex
-    ? // HNSW индекс — более быстрый при поиске, но требует больше памяти
-      // Note: pgvector 0.7+ uses simplified syntax without operator classes
-      `CREATE INDEX IF NOT EXISTS ${tableName}_embedding_idx ON ${tableName} USING hnsw (embedding vector_cosine_ops)`
-    : // IVFFlat индекс — более быстрое построение, но медленнее при поиске
-      // Note: CREATE INDEX ... USING ivfflat doesn't support schema-qualified names
-      // in PostgreSQL, so we use unqualified names (search_path is set before execution)
-      // Note: pgvector 0.7+ uses simplified syntax without operator classes
-      `CREATE INDEX IF NOT EXISTS ${tableName}_embedding_idx ON ${tableName} USING ivfflat (embedding) WITH (lists = ${ivfLists})`
+  const vectorIndexSQL = useHalfvecIndex
+    ? // halfvec HNSW индекс — поддерживает до 4000 измерений.
+      // Индекс строится на выражении-приведении embedding::halfvec(dim).
+      // Требует pgvector >= 0.7.0.
+      `CREATE INDEX IF NOT EXISTS ${tableName}_embedding_idx ON ${tableName} USING hnsw ((embedding::halfvec(${embeddingDim})) halfvec_cosine_ops)`
+    : useHNSWIndex
+      ? // HNSW индекс — более быстрый при поиске, но требует больше памяти
+        // Note: pgvector 0.7+ uses simplified syntax without operator classes
+        `CREATE INDEX IF NOT EXISTS ${tableName}_embedding_idx ON ${tableName} USING hnsw (embedding vector_cosine_ops)`
+      : // IVFFlat индекс — более быстрое построение, но медленнее при поиске
+        // Note: CREATE INDEX ... USING ivfflat doesn't support schema-qualified names
+        // in PostgreSQL, so we use unqualified names (search_path is set before execution)
+        // Note: pgvector 0.7+ uses simplified syntax without operator classes
+        `CREATE INDEX IF NOT EXISTS ${tableName}_embedding_idx ON ${tableName} USING ivfflat (embedding) WITH (lists = ${ivfLists})`
 
+  const indexType = useHalfvecIndex ? 'halfvec-HNSW' : useHNSWIndex ? 'HNSW' : 'IVFFlat'
   console.error(
-    `buildSchemaSQL: Creating table with embedding dimension ${embeddingDim} and index type ${useHNSWIndex ? 'HNSW' : 'IVFFlat'}`
+    `buildSchemaSQL: Creating table with embedding dimension ${embeddingDim} and index type ${indexType}`
   )
 
   return [
@@ -123,6 +147,7 @@ export function buildSchemaSQL(config: PostgreSQLVectorStoreConfig): string[] {
     'CREATE EXTENSION IF NOT EXISTS vector',
 
     // Chunks table — main storage for vectors and text
+    // Note: embedding stored as VECTOR(dim), indexing may use halfvec conversion
     `CREATE TABLE IF NOT EXISTS ${qualified(tableName, schema)} (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       file_path TEXT NOT NULL,
@@ -135,7 +160,7 @@ export function buildSchemaSQL(config: PostgreSQLVectorStoreConfig): string[] {
     )`,
 
     // Vector index for search
-    // IVFFlat поддерживает размерность до 2000, HNSW поддерживает до 65535
+    // halfvec индекс поддерживает размерность до 4000 (через приведение embedding::halfvec)
     vectorIndexSQL,
 
     // Index for fast file path lookup
@@ -206,17 +231,24 @@ export class PostgreSQLVectordb implements IVectordb {
   private embeddingDim: number
   private schema: string
   private useHNSWIndex: boolean
+  private useHalfvecIndex: boolean
 
   constructor(config: PostgreSQLVectorStoreConfig) {
     this.config = config
     this.tableName = config.tableName || DEFAULT_TABLES.chunks
     this.embeddingDim = config.embeddingDimension ?? 384
 
-    // Проверка размерности: IVFFlat и HNSW индексы pgvector поддерживают только размерности <= 2000
-    if (this.embeddingDim > 2000) {
+    // halfvec индекс поддерживает до 4000 измерений (против 2000 для vector).
+    // Если embeddingDim > 2000 и useHalfvecIndex не установлен — предупреждаем.
+    this.useHalfvecIndex = config.useHalfvecIndex ?? false
+
+    // IVFFlat и HNSW индексы pgvector поддерживают только размерности <= 2000.
+    // Если halfvec не включён и размерность > 2000 — выбрасываем ошибку.
+    if (this.embeddingDim > 2000 && !this.useHalfvecIndex) {
       throw new DatabaseError(
         `Embedding dimension ${this.embeddingDim} exceeds PostgreSQL index limit of 2000. ` +
-          `Please use a model with dimension <= 2000 (e.g., all-MiniLM-L6-v2: 384, Qwen2.5-Embedding: 768).`
+          `Please set USE_HALFVEC_INDEX=true to use halfvec type (requires pgvector >= 0.7.0). ` +
+          `halfvec supports up to 4000 dimensions.`
       )
     }
 
@@ -225,18 +257,19 @@ export class PostgreSQLVectordb implements IVectordb {
     // ivfLists используется только для IVFFlat индекса
     this.schema = config.pgConfig.schema || DEFAULT_PG_SCHEMA
     console.error(
-      `PostgreSQLVectordb: Constructor: embeddingDim=${this.embeddingDim}, useHNSWIndex=${this.useHNSWIndex}, config.embeddingDimension=${config.embeddingDimension}`
+      `PostgreSQLVectordb: Constructor: embeddingDim=${this.embeddingDim}, useHNSWIndex=${this.useHNSWIndex}, useHalfvecIndex=${this.useHalfvecIndex}, config.embeddingDimension=${config.embeddingDimension}`
     )
   }
 
   /**
-   * Получить конфигурацию для buildSchemaSQL, включающую useHNSWIndex.
+   * Получить конфигурацию для buildSchemaSQL, включающую useHNSWIndex и useHalfvecIndex.
    * Это необходимо для TypeScript проверки использования свойства.
    */
   private getConfigForSchema(): PostgreSQLVectorStoreConfig {
     const config: PostgreSQLVectorStoreConfig = {
       ...this.config,
       useHNSWIndex: this.useHNSWIndex,
+      useHalfvecIndex: this.useHalfvecIndex,
       // Если useHNSWIndex не установлен явно, но embeddingDimension > 2000,
       // передаём false для предотвращения создания HNSW индекса с недопустимой размерностью
       embeddingDimension: this.embeddingDim,
@@ -373,10 +406,12 @@ export class PostgreSQLVectordb implements IVectordb {
           )
         }
 
-        // Verify pgvector is functional by creating a simple vector
+        // Verify pgvector is functional by creating a simple vector.
+        // When using halfvec, test halfvec casting instead.
         // Note: Using fixed-size vector syntax (e.g., vector(4096)) can cause
         // protocol errors on some PostgreSQL versions, so we use a simpler test.
-        await client.query('SELECT ARRAY[0,0,0]::vector')
+        const testCast = this.useHalfvecIndex ? 'halfvec' : 'vector'
+        await client.query(`SELECT ARRAY[0,0,0]::${testCast}`)
       } finally {
         client.release()
       }
@@ -639,10 +674,28 @@ export class PostgreSQLVectordb implements IVectordb {
       const queryVectorStr = `[${queryVector.join(',')}]`
       const candidateLimit = limit * HYBRID_SEARCH_CANDIDATE_MULTIPLIER
 
-      // Step 1: Vector search using pgvector IVFFlat index
+      // Determine cast type for query vector: halfvec when using halfvec index, vector otherwise.
+      // halfvec supports up to 4000 dimensions, enabling search with models like Qwen3-Embedding-4B.
+      // For halfvec, we must specify the dimension in the cast expression.
+      // Note: pg-driver cannot determine the type of $1::halfvec(...) so we embed the literal
+      // directly into the SQL string instead of using it as a parameter.
+      // This matches the working approach in vector-loader/search-pgvector.ts.
+      // Important: PostgreSQL halfvec requires ARRAY[...] syntax, not [...] array literal.
+      let vectorExpr: string
+      if (this.useHalfvecIndex) {
+        // Embed the vector literal directly in SQL — avoids pg-driver type inference issues.
+        // Use ARRAY[...] syntax for halfvec (PostgreSQL requires this for halfvec literals).
+        // The HNSW index is built on (embedding::halfvec(dim)), so we use the same cast.
+        const halfvecLiteral = `ARRAY[${queryVectorStr.slice(1, -1)}]`
+        vectorExpr = `(embedding::halfvec(${this.embeddingDim})) <=> (${halfvecLiteral}::halfvec(${this.embeddingDim}))`
+      } else {
+        vectorExpr = `embedding <=> ${queryVectorStr}::vector`
+      }
+
+      // Step 1: Vector search using pgvector IVFFlat/HNSW index
       let vectorSQL = `
         SELECT file_path, chunk_index, text, file_title,
-               1 - (embedding <=> $1::vector) AS score
+               1 - (${vectorExpr}) AS score
         FROM ${qualified(this.tableName, this.schema)}
       `
 
@@ -652,18 +705,20 @@ export class PostgreSQLVectordb implements IVectordb {
         vectorSQL += ` WHERE (${predicates.join(' OR ')})`
       }
 
-      // Distance threshold
+      // Distance threshold — uses $1 when maxDistance is set, otherwise no threshold param
       if (this.config.maxDistance !== undefined) {
-        vectorSQL += ` AND (1 - (embedding <=> $1::vector)) <= $2`
+        vectorSQL += ` AND (1 - (${vectorExpr})) <= $1`
       }
 
-      vectorSQL += ` ORDER BY embedding <=> $1::vector LIMIT $3`
+      // LIMIT param — always $1 when no maxDistance, $2 when maxDistance is set
+      const limitParam = this.config.maxDistance !== undefined ? '$2' : '$1'
+      vectorSQL += ` ORDER BY ${vectorExpr} LIMIT ${limitParam}`
 
-      const vectorParams = [queryVectorStr]
+      const vectorParams: (string | number)[] = []
       if (this.config.maxDistance !== undefined) {
         vectorParams.push(String(1 - this.config.maxDistance))
       }
-      vectorParams.push(String(candidateLimit))
+      vectorParams.push(candidateLimit)
 
       const vectorResult = await this.pool.query(vectorSQL, vectorParams)
 

@@ -313,6 +313,13 @@ export interface PostgreSQLVectorStoreConfig {
   ivfLists?: number
   /** Use HNSW index instead of IVFFlat (default: false, IVFFlat used when dimension <= 2000) */
   useHNSWIndex?: boolean
+  /**
+   * Use halfvec type for indexing (default: false).
+   * halfvec supports up to 4000 dimensions vs 2000 for vector type.
+   * Required for embedding models with dimension > 2000 (e.g., Qwen3-Embedding-4B: 4096).
+   * Requires pgvector >= 0.7.0.
+   */
+  useHalfvecIndex?: boolean
   /** Schema name (default: 'public') — used for multi-tenant scenarios */
   schema?: string
 }
@@ -346,6 +353,7 @@ export type VectorStoreConfig =
       embeddingDimension?: number
       ivfLists?: number
       useHNSWIndex?: boolean
+      useHalfvecIndex?: boolean
       schema?: string
     }
 

@@ -89,17 +89,20 @@ export function createVectorStore(config: ResolvedGlobalConfig): VectorStore | P
     const ivfLists = Number.parseInt(process.env['RAG_IVF_LISTS'] ?? '100', 10) || 100
     const hybridWeight = parseFloat(process.env['RAG_HYBRID_WEIGHT'] ?? '0.6') || 0.6
 
-    // PostgreSQL IVFFlat и HNSW индексы в pgvector 0.7+ имеют лимит 2000 размерностей.
-    // Оба индекса поддерживают только размерности <= 2000.
-    // Для размерностей > 2000 выбрасываем ошибку с рекомендацией использовать меньшую размерность.
-    if (embeddingDimension > 2000) {
-      throw new Error(
-        `Embedding dimension ${embeddingDimension} exceeds PostgreSQL index limit of 2000. ` +
-          `Please set EMBEDDING_SIZE to a value <= 2000, or use a different embedding model. ` +
-          `Supported models: all-MiniLM-L6-v2 (384), Qwen2.5-Embedding (768).`
+    // Читаем флаг USE_HALFVEC_INDEX для поддержки размерностей > 2000.
+    // halfvec тип pgvector поддерживает до 4000 измерений (против 2000 для vector).
+    // Требуется pgvector >= 0.7.0.
+    const useHalfvecIndex = process.env['USE_HALFVEC_INDEX'] === 'true'
+
+    // Если размерность > 2000 и halfvec не включён — предупреждаем пользователя.
+    if (embeddingDimension > 2000 && !useHalfvecIndex) {
+      console.error(
+        `ПРЕДУПРЕЖДЕНИЕ: Размерность эмбеддингов ${embeddingDimension} превышает лимит 2000 для pgvector. ` +
+          `Установите USE_HALFVEC_INDEX=true для поддержки больших размерностей (требуется pgvector >= 0.7.0).`
       )
     }
 
+    // HNSW индекс не используется по умолчанию — только с явным флагом.
     const useHNSWIndex = false
 
     // Для HNSW индекса ivfLists не требуется, передаем undefined
@@ -109,6 +112,7 @@ export function createVectorStore(config: ResolvedGlobalConfig): VectorStore | P
       embeddingDimension,
       ...(useHNSWIndex ? {} : { ivfLists }), // Передаем ivfLists только если не HNSW
       useHNSWIndex,
+      useHalfvecIndex,
       hybridWeight,
       pgConfig,
     })
