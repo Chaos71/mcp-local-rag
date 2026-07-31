@@ -40,6 +40,8 @@
 ```bash
 npx mcp-local-rag ingest ./docs/
 npx mcp-local-rag query "authentication API"
+npx mcp-local-rag duplicates list                    # Показать группы дубликатов
+npx mcp-local-rag duplicates cleanup --dry-run       # Предпросмотр очистки
 ```
 
 ## Структура проекта
@@ -268,10 +270,62 @@ mcp-local-rag отслеживает дубликаты документов с 
 - **LanceDB:** Добавлен столбец `status` (active/deprecated) и столбец `contentHash` в таблицу chunks; создаёт таблицу `duplicates` при первой вставке.
 - **PostgreSQL:** Добавлен столбец `status` в таблицу `chunks`; создаёт таблицу `duplicates` при `initialize()`.
 
+**CLI-подкоманды:**
+
+Две новые CLI-подкоманды управляют дубликатами документов:
+
+```bash
+# Показать все группы дубликатов
+npx mcp-local-rag duplicates list
+
+# Показать с включёнными deprecated-записями
+npx mcp-local-rag duplicates list --include-deprecated
+
+# Вывести в формате JSON для конвейеризации
+npx mcp-local-rag duplicates list --format json
+
+# Предпросмотр очистки без выполнения
+npx mcp-local-rag duplicates cleanup --dry-run
+
+# Выполнить очистку (удаляет deprecated-чанки)
+npx mcp-local-rag duplicates cleanup
+```
+
+**Опции `duplicates list`:**
+
+| Опция | Описание |
+|-------|----------|
+| `--include-deprecated` | Включить deprecated-записи в результаты |
+| `--format <format>` | Формат вывода: `human` или `json` (по умолчанию: `human`) |
+| `-h, --help` | Показать справку |
+
+**Опции `duplicates cleanup`:**
+
+| Опция | Описание |
+|-------|----------|
+| `--dry-run` | Показать, что будет удалено, без фактического удаления |
+| `-h, --help` | Показать справку |
+
+**Пример вывода (human-readable):**
+
+```
+Найдено 2 группы дубликатов, всего 5 дубликатов
+
+Хеш: a1b2c3d4e5f6...
+  Файлы:
+    - /Users/me/docs/api-spec.pdf
+    - /Users/me/docs/api-spec-backup.pdf
+
+Хеш: f6e5d4c3b2a1...
+  Файлы:
+    - /Users/me/docs/guide.pdf
+    - /Users/me/docs/guide.pdf [deprecated]
+    - /Users/me/docs/guide-old.pdf
+```
+
 **В следующей итерации:**
 
 - Инструменты MCP: `list_duplicates`, `cleanup_duplicates`
-- Подкоманды CLI: `duplicates list`, `duplicates cleanup`
 - Валидация `DUPLICATE_MODE` в `tool-input.ts`
 - Unit-тесты для `computeContentHash()` и `DuplicateStore`
 - Integration-тесты для `handleIngestFile` с дубликатами

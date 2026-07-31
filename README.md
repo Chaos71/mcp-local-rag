@@ -229,6 +229,9 @@ npx mcp-local-rag list --scope /docs/api --scope /docs/guide  # Restrict listing
 npx mcp-local-rag status                        # Database stats
 npx mcp-local-rag delete ./docs/old.pdf         # Remove content
 npx mcp-local-rag delete --source "https://..."  # Remove by source URL
+npx mcp-local-rag duplicates list               # List duplicate document groups
+npx mcp-local-rag duplicates list --include-deprecated --format json  # Include deprecated as JSON
+npx mcp-local-rag duplicates cleanup --dry-run  # Preview cleanup without executing
 ```
 
 `query`, `read-neighbors`, `list`, `status`, and `delete` output JSON to stdout for piping (e.g., `| jq`). `ingest` outputs progress to stderr. Global options (`--db-path`, `--cache-dir`, `--model-name`) go before the subcommand. Run `npx mcp-local-rag --help` for details.
@@ -727,6 +730,59 @@ When ingesting a duplicate file, the CLI shows the status:
 - **LanceDB:** Added `status` column (active/deprecated) and `contentHash` column to chunks table; creates `duplicates` table on first insertion.
 - **PostgreSQL:** Added `status` column to `chunks` table; creates `duplicates` table during `initialize()`.
 
+**CLI Subcommands:**
+
+Two new CLI subcommands manage duplicate documents:
+
+```bash
+# List all duplicate groups
+npx mcp-local-rag duplicates list
+
+# List with deprecated entries included
+npx mcp-local-rag duplicates list --include-deprecated
+
+# Output as JSON for piping
+npx mcp-local-rag duplicates list --format json
+
+# Preview cleanup without executing
+npx mcp-local-rag duplicates cleanup --dry-run
+
+# Execute cleanup (removes deprecated chunks)
+npx mcp-local-rag duplicates cleanup
+```
+
+**`duplicates list` options:**
+
+| Option | Description |
+|--------|-------------|
+| `--include-deprecated` | Include deprecated entries in results |
+| `--format <format>` | Output format: `human` or `json` (default: `human`) |
+| `-h, --help` | Show help |
+
+**`duplicates cleanup` options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dry-run` | Show what would be removed without making changes |
+| `-h, --help` | Show help |
+
+**Example output (human-readable):**
+
+```
+Found 2 duplicate group(s), 5 total duplicate(s)
+
+Hash: a1b2c3d4e5f6...
+  Files:
+    - /Users/me/docs/api-spec.pdf
+    - /Users/me/docs/api-spec-backup.pdf
+
+Hash: f6e5d4c3b2a1...
+  Files:
+    - /Users/me/docs/guide.pdf
+    - /Users/me/docs/guide.pdf [deprecated]
+    - /Users/me/docs/guide-old.pdf
+```
+
 **Implemented:**
 
 - SHA-256 content hash computation in `handleIngestFile` (MCP server) and `ingestSingleFile` (CLI) via `computeContentHash()`
@@ -740,7 +796,6 @@ When ingesting a duplicate file, the CLI shows the status:
 **Pending (next iteration):**
 
 - MCP tools: `list_duplicates`, `cleanup_duplicates`
-- CLI subcommands: `duplicates list`, `duplicates cleanup`
 - `DUPLICATE_MODE` validation in `tool-input.ts`
 - Unit tests for `computeContentHash()` and `DuplicateStore`
 - Integration tests for `handleIngestFile` with duplicates

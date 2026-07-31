@@ -1,6 +1,7 @@
 // CLI entry point for subcommands (skills install, etc.)
 import { run as runSkillsInstall } from './bin/install-skills.js'
 import { runDelete } from './cli/delete.js'
+import { runDuplicates } from './cli/duplicates.js'
 import { runIngest } from './cli/ingest.js'
 import { runList } from './cli/list.js'
 import type { GlobalOptions } from './cli/options.js'
@@ -16,6 +17,7 @@ export const SUBCOMMANDS = [
   'status',
   'delete',
   'read-neighbors',
+  'duplicates',
 ] as const
 
 export type Subcommand = (typeof SUBCOMMANDS)[number]
@@ -68,6 +70,10 @@ export async function handleCli(
 
     case 'read-neighbors':
       await runReadNeighbors(args, globalOptions)
+      break
+
+    case 'duplicates':
+      await runDuplicates(args, globalOptions)
       break
   }
 }

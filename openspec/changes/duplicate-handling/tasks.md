@@ -20,36 +20,29 @@
 - [x] 3.4 Аналогичная интеграция в CLI `ingestSingleFile`
 - [x] 3.5 Добавить поле `isDuplicate` в `IngestedFileSummary` для `list_files`
 
-## 4. Новые инструменты MCP
+## 4 CLI-подкоманды
 
-- [ ] 4.1 Добавить инструмент `list_duplicates` — показать все цепочки дубликатов
-- [ ] 4.2 Добавить инструмент `cleanup_duplicates` — удалить устаревшие дубликаты
-- [ ] 4.3 Обновить `tool-definitions.ts` — добавить определения инструментов
-- [ ] 4.4 Обновить `tool-input.ts` — добавить парсеры входных данных
+- [x] 4.1 Создать `src/cli/duplicates.ts` — CLI-подкоманды `duplicates list`, `duplicates cleanup`
+- [ ] 4.2 Добавить парсинг аргументов: `--include-deprecated`, `--dry-run`
+- [ ] 4.3 Вывести результат в формате JSON или human-readable
+- [ ] 4.4 Добавить `--help` текст
 
-## 5. CLI-подкоманды
+## 5. Конфигурация
 
-- [ ] 5.1 Создать `src/cli/duplicates.ts` — CLI-подкоманды `duplicates list`, `duplicates cleanup`
-- [ ] 5.2 Добавить парсинг аргументов: `--include-deprecated`, `--dry-run`
-- [ ] 5.3 Вывести результат в формате JSON или human-readable
-- [ ] 5.4 Добавить `--help` текст
+- [ ] 5.1 Добавить переменную окружения `DUPLICATE_MODE` (значения: `skip`, `update`, `track`)
+- [ ] 5.2 Добавить валидацию значения в `tool-input.ts`
+- [ ] 5.3 Обновить `.env.example` — добавить `DUPLICATE_MODE=skip`
+- [ ] 5.4 Обновить `QWEN.md` — документация по режимам дубликатов
 
-## 6. Конфигурация
+## 6. Тестирование
 
-- [ ] 6.1 Добавить переменную окружения `DUPLICATE_MODE` (значения: `skip`, `update`, `track`)
-- [ ] 6.2 Добавить валидацию значения в `tool-input.ts`
-- [ ] 6.3 Обновить `.env.example` — добавить `DUPLICATE_MODE=skip`
-- [ ] 6.4 Обновить `QWEN.md` — документация по режимам дубликатов
+- [ ] 6.1 Unit-тесты для `computeContentHash()` — проверка корректности SHA-256
+- [ ] 6.2 Unit-тесты для `DuplicateStore` — add, findByHash, findDuplicates
+- [ ] 6.3 Integration-тесты для `handleIngestFile` с дубликатами
+- [ ] 6.4 Integration-тесты для CLI-подкоманд `duplicates list` и `duplicates cleanup`
 
-## 7. Тестирование
+## 7. Документация
 
-- [ ] 7.1 Unit-тесты для `computeContentHash()` — проверка корректности SHA-256
-- [ ] 7.2 Unit-тесты для `DuplicateStore` — add, findByHash, findDuplicates
-- [ ] 7.3 Integration-тесты для `handleIngestFile` с дубликатами
-- [ ] 7.4 Integration-тесты для CLI-подкоманд `duplicates list` и `duplicates cleanup`
-
-## 8. Документация
-
-- [ ] 8.1 Обновить `README.md` и `README_RUS.md` — раздел про обработку дубликатов
-- [ ] 8.2 Обновить `openspec/specs/mcp-local-rag/spec.md` — добавить требования к дубликатам
-- [ ] 8.3 Добавить примеры использования CLI-команд в документации
+- [ ] 7.1 Обновить `README.md` и `README_RUS.md` — раздел про обработку дубликатов
+- [ ] 7.2 Обновить `openspec/specs/mcp-local-rag/spec.md` — добавить требования к дубликатам
+- [ ] 7.3 Добавить примеры использования CLI-команд в документации

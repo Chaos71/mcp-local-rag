@@ -229,6 +229,9 @@ npx mcp-local-rag list --scope /docs/api --scope /docs/guide  # Ограничи
 npx mcp-local-rag status                        # Статистика базы данных
 npx mcp-local-rag delete ./docs/old.pdf         # Удалить содержимое
 npx mcp-local-rag delete --source "https://..."  # Удалить по URL источника
+npx mcp-local-rag duplicates list               # Показать группы дубликатов
+npx mcp-local-rag duplicates list --include-deprecated --format json  # Включить deprecated в формате JSON
+npx mcp-local-rag duplicates cleanup --dry-run  # Предпросмотр очистки без выполнения
 ```
 
 `query`, `read-neighbors`, `list`, `status` и `delete` выводят JSON в stdout для конвейеризации (например, `| jq`). `ingest` выводит прогресс в stderr. Глобальные опции (`--db-path`, `--cache-dir`, `--model-name`) идут перед подкомандой. Запустите `npx mcp-local-rag --help` для подробностей.
@@ -843,6 +846,59 @@ npx mcp-local-rag --duplicate-mode update ingest ./docs/
 - **LanceDB:** Добавлен столбец `status` (active/deprecated) и столбец `contentHash` в таблицу chunks; создаёт таблицу `duplicates` при первой вставке.
 - **PostgreSQL:** Добавлен столбец `status` в таблицу `chunks`; создаёт таблицу `duplicates` при `initialize()`.
 
+**CLI-подкоманды:**
+
+Две новые CLI-подкоманды управляют дубликатами документов:
+
+```bash
+# Показать все группы дубликатов
+npx mcp-local-rag duplicates list
+
+# Показать с включёнными deprecated-записями
+npx mcp-local-rag duplicates list --include-deprecated
+
+# Вывести в формате JSON для конвейеризации
+npx mcp-local-rag duplicates list --format json
+
+# Предпросмотр очистки без выполнения
+npx mcp-local-rag duplicates cleanup --dry-run
+
+# Выполнить очистку (удаляет deprecated-чанки)
+npx mcp-local-rag duplicates cleanup
+```
+
+**Опции `duplicates list`:**
+
+| Опция | Описание |
+|-------|----------|
+| `--include-deprecated` | Включить deprecated-записи в результаты |
+| `--format <format>` | Формат вывода: `human` или `json` (по умолчанию: `human`) |
+| `-h, --help` | Показать справку |
+
+**Опции `duplicates cleanup`:**
+
+| Опция | Описание |
+|-------|----------|
+| `--dry-run` | Показать, что будет удалено, без фактического удаления |
+| `-h, --help` | Показать справку |
+
+**Пример вывода (human-readable):**
+
+```
+Найдено 2 группы дубликатов, всего 5 дубликатов
+
+Хеш: a1b2c3d4e5f6...
+  Файлы:
+    - /Users/me/docs/api-spec.pdf
+    - /Users/me/docs/api-spec-backup.pdf
+
+Хеш: f6e5d4c3b2a1...
+  Файлы:
+    - /Users/me/docs/guide.pdf
+    - /Users/me/docs/guide.pdf [deprecated]
+    - /Users/me/docs/guide-old.pdf
+```
+
 **Реализовано:**
 
 - Вычисление хеша содержимого SHA-256 в `handleIngestFile` (MCP-сервер) и `ingestSingleFile` (CLI) через `computeContentHash()`
@@ -856,7 +912,6 @@ npx mcp-local-rag --duplicate-mode update ingest ./docs/
 **В следующей итерации:**
 
 - Инструменты MCP: `list_duplicates`, `cleanup_duplicates`
-- Подкоманды CLI: `duplicates list`, `duplicates cleanup`
 - Валидация `DUPLICATE_MODE` в `tool-input.ts`
 - Unit-тесты для `computeContentHash()` и `DuplicateStore`
 - Integration-тесты для `handleIngestFile` с дубликатами
