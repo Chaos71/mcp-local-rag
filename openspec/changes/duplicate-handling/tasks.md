@@ -1,8 +1,8 @@
 ## 1. Создание модуля дубликатов
 
-- [ ] 1.1 Создать `src/duplicates/hash.ts` — функция `computeContentHash(filePath: string): string` для вычисления SHA-256
-- [ ] 1.2 Создать `src/duplicates/types.ts` — типы `DuplicateEntry`, `DuplicateMode`
-- [ ] 1.3 Создать `src/duplicates/store.ts` — класс `DuplicateStore` с методами `add()`, `findByHash()`, `findDuplicates()`, `getAll()`, `remove()`
+- [x] 1.1 Создать `src/duplicates/hash.ts` — функция `computeContentHash(filePath: string): string` для вычисления SHA-256
+- [x] 1.2 Создать `src/duplicates/types.ts` — типы `DuplicateEntry`, `DuplicateMode`
+- [x] 1.3 Создать `src/duplicates/store.ts` — класс `DuplicateStore` с методами `add()`, `findByHash()`, `findDuplicates()`, `getAll()`, `remove()`
 
 ## 2. Расширение схемы БД
 

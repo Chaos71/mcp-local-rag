@@ -17,6 +17,7 @@ export type AppErrorLayer =
   | 'vectordb'
   | 'config'
   | 'pdf-visual'
+  | 'duplicates'
 
 /** Nature of the failure, independent of layer. */
 export type AppErrorKind = 'validation' | 'io' | 'config' | 'internal'
