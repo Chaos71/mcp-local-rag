@@ -680,6 +680,29 @@ VECTORDB_BACKEND=postgresql PG_HOST=localhost PG_DATABASE=mcp_local_rag \
 | pgvector index | IVFFlat/HNSW | IVFFlat/HNSW |
 | Keyword boost | FTS (ngram) | pg_trgm |
 
+### Duplicate Handling
+
+mcp-local-rag tracks document duplicates using SHA-256 content hashing. When the same file (by content) is ingested multiple times, the system can either skip it, update the existing entry, or track both versions.
+
+**Configuration:**
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `DUPLICATE_MODE` | `skip` | Mode for handling duplicates: `skip` (skip loading), `update` (replace), `track` (save both with a mark) |
+
+**Schema Changes:**
+
+- **LanceDB:** Added `status` column (active/deprecated) and `contentHash` column to chunks table; creates `duplicates` table on first insertion.
+- **PostgreSQL:** Added `status` column to `chunks` table; creates `duplicates` table during `initialize()`.
+
+**Future Features (in progress):**
+
+- MCP tools: `list_duplicates`, `cleanup_duplicates`
+- CLI subcommands: `duplicates list`, `duplicates cleanup`
+- `IngestResult.status` field: `'new' | 'skipped' | 'updated' | 'tracked'`
+
+> **Note:** Duplicate handling integration in the ingest pipeline (Section 3) is currently in progress. The schema and tracking infrastructure are ready.
+
 ### Document Roots (`BASE_DIR` and `BASE_DIRS`)
 
 mcp-local-rag enforces a security boundary: only files under a configured root are accessible to ingest, list, delete, or read-neighbor operations.

@@ -21,6 +21,17 @@ import {
   type VectorStoreConfig,
 } from './types.js'
 
+// ============================================
+// Duplicate tracking types (LanceDB internal)
+// ============================================
+
+/** Internal row shape for duplicate tracking queries */
+interface DuplicateRow {
+  filePath: string
+  contentHash?: string
+  status?: string
+}
+
 // Re-export public API
 export type { GroupingMode, SearchResult, VectorChunk } from './types.js'
 export { type IVectordb, PostgreSQLVectordb }
@@ -293,9 +304,24 @@ export class VectorStore implements IVectordb {
     }
 
     const schema = await this.table.schema()
-    const hasFileTitle = schema.fields.some((f: { name: string }) => f.name === 'fileTitle')
+    const fieldNames = schema.fields.map((f: { name: string }) => f.name)
 
-    if (!hasFileTitle) {
+    // 2.1: Add 'status' column for soft-deletion (deprecated chunks)
+    if (!fieldNames.includes('status')) {
+      await this.table.addColumns([{ name: 'status', valueSql: 'cast(NULL as string)' }])
+      console.error('VectorStore: Migrated schema - added status column (for deprecated chunks)')
+    }
+
+    // 2.3: Add 'contentHash' column for duplicate tracking
+    if (!fieldNames.includes('contentHash')) {
+      await this.table.addColumns([{ name: 'contentHash', valueSql: 'cast(NULL as string)' }])
+      console.error(
+        'VectorStore: Migrated schema - added contentHash column (for duplicate tracking)'
+      )
+    }
+
+    // Legacy: add 'fileTitle' column (already handled in previous versions)
+    if (!fieldNames.includes('fileTitle')) {
       await this.table.addColumns([{ name: 'fileTitle', valueSql: 'cast(NULL as string)' }])
       console.error('VectorStore: Migrated schema - added fileTitle column')
     }
@@ -592,6 +618,164 @@ export class VectorStore implements IVectordb {
       this.table = null
       this.ftsEnabled = false
       console.error('VectorStore connection closed')
+    }
+  }
+
+  // ============================================
+  // Duplicate tracking methods (Section 2.5)
+  // ============================================
+
+  /**
+   * Find all chunks sharing the same content hash (duplicates).
+   * Returns groups of chunks where each group shares one `contentHash`.
+   *
+   * LanceDB does not have a dedicated `duplicates` table — this method
+   * derives duplicate groups from the `chunks` table by grouping on
+   * `contentHash` (a column added via ensureSchemaVersion).
+   *
+   * @param contentHash — SHA-256 hash of file content (if provided, returns only that hash)
+   * @param includeDeprecated — include deprecated chunks in results (default: false)
+   * @returns Array of duplicate groups, each with shared hash and list of chunk paths
+   */
+  async getDuplicatesByHash(
+    contentHash: string,
+    includeDeprecated = false
+  ): Promise<
+    {
+      contentHash: string
+      filePaths: string[]
+      deprecatedFilePaths?: string[]
+    }[]
+  > {
+    if (!this.table) {
+      return []
+    }
+
+    try {
+      // Build WHERE clause: filter by contentHash and optionally by status
+      const escapedHash = contentHash.replace(/'/g, "''")
+      let predicate = `\`contentHash\` = '${escapedHash}'`
+      if (!includeDeprecated) {
+        predicate += " AND (`status` IS NULL OR `status` = 'active')"
+      }
+
+      const raw = await this.table.query().where(predicate).toArray()
+
+      // Group by contentHash and separate active/deprecated filePaths
+      const groups = new Map<string, { active: string[]; deprecated: string[] }>()
+
+      for (const row of raw) {
+        const hash = (row as DuplicateRow).contentHash
+        const filePath = (row as DuplicateRow).filePath
+        const status = (row as DuplicateRow).status
+
+        if (typeof hash !== 'string' || typeof filePath !== 'string') continue
+
+        if (!groups.has(hash)) {
+          groups.set(hash, { active: [], deprecated: [] })
+        }
+        const group = groups.get(hash)!
+        if (status === 'deprecated') {
+          group.deprecated.push(filePath)
+        } else {
+          group.active.push(filePath)
+        }
+      }
+
+      // Convert Map to result array
+      return Array.from(groups.entries()).map(([hash, group]) => {
+        const result: {
+          contentHash: string
+          filePaths: string[]
+          deprecatedFilePaths?: string[]
+        } = {
+          contentHash: hash,
+          filePaths: group.active,
+        }
+        if (group.deprecated.length > 0) {
+          result.deprecatedFilePaths = group.deprecated
+        }
+        return result
+      })
+    } catch (error) {
+      // If contentHash column doesn't exist yet, return empty (schema not migrated)
+      console.error('VectorStore: getDuplicatesByHash failed (schema may not be migrated):', error)
+      return []
+    }
+  }
+
+  /**
+   * Mark all chunks for a given file path as 'deprecated' (soft-delete).
+   * Used when a document is replaced — old version is kept but hidden from search.
+   *
+   * LanceDB does not support UPDATE natively, so this is implemented by:
+   * 1. Reading all chunks for the file path
+   * 2. Setting status = 'deprecated' in memory
+   * 3. Re-inserting the chunks (LanceDB's add() will append)
+   *
+   * Note: This approach creates duplicate rows with updated status. For true
+   * UPDATE semantics, a future migration could use LanceDB's experimental
+   * update API when available.
+   */
+  async markDeprecated(filePath: string): Promise<number> {
+    if (!this.table) {
+      console.error('VectorStore: Skipping markDeprecated as table does not exist')
+      return 0
+    }
+
+    try {
+      // Read all chunks for this file
+      const chunks = await this.getChunksByFilePath(filePath)
+
+      if (chunks.length === 0) {
+        return 0
+      }
+
+      // Mark each chunk as deprecated and re-insert
+      const deprecatedChunks = chunks.map((chunk) => ({
+        ...chunk,
+        status: 'deprecated' as const,
+      }))
+
+      // Re-insert with deprecated status
+      const records = deprecatedChunks.map((chunk) => chunk as unknown as Record<string, unknown>)
+      await this.table.add(records)
+
+      console.error(
+        `VectorStore: Marked ${deprecatedChunks.length} chunks as deprecated for "${filePath}"`
+      )
+      return deprecatedChunks.length
+    } catch (error) {
+      throw new DatabaseError(
+        `Failed to mark chunks as deprecated for file: ${filePath}`,
+        error as Error
+      )
+    }
+  }
+
+  /**
+   * Remove all deprecated chunks from the database.
+   * Cleans up storage occupied by soft-deleted chunks.
+   *
+   * Uses LanceDB's delete API to remove rows where status = 'deprecated'.
+   */
+  async cleanupDuplicates(): Promise<number> {
+    if (!this.table) {
+      console.error('VectorStore: Skipping cleanupDuplicates as table does not exist')
+      return 0
+    }
+
+    try {
+      // Delete all deprecated chunks
+      const predicate = "`status` = 'deprecated'"
+      const { numDeletedRows } = await this.table.delete(predicate)
+
+      console.error(`VectorStore: Cleaned up ${numDeletedRows} deprecated chunks`)
+      return numDeletedRows
+    } catch (error) {
+      // If status column doesn't exist yet, return 0 (schema not migrated)
+      console.error('VectorStore: cleanupDuplicates failed (schema may not be migrated):', error)
+      return 0
     }
   }
 }

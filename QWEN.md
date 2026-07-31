@@ -62,6 +62,10 @@ src/
 │   ├── llama-cpp.ts      # llama.cpp HTTP-бэкенд
 │   ├── factory.ts        # Фабрика createEmbedder()
 │   └── types.ts          # Общие типы
+├── duplicates/           # Обработка дубликатов (SHA-256 хеширование)
+│   ├── hash.ts           # computeContentHash()
+│   ├── types.ts          # DuplicateEntry, DuplicateMode
+│   └── store.ts          # DuplicateStore
 ├── vectordb/             # LanceDB операции
 ├── features/             # Feature flags
 ├── pdf-visual/           # Визуальный режим для PDF (VLM)
@@ -197,6 +201,41 @@ export PG_SCHEMA=mytenant
 | Зависимости | ~10 MB (@lancedb/lancedb) | ~100 KB (pg) |
 | pgvector индекс | IVFFlat/HNSW | IVFFlat/HNSW |
 | Keyword boost | FTS (ngram) | pg_trgm |
+
+### Обработка дубликатов
+
+mcp-local-rag отслеживает дубликаты документов с помощью хеширования содержимого SHA-256. При повторной загрузке одного и того же файла (по содержимому) система может пропустить его, обновить существующую запись или сохранить обе версии.
+
+**Модули:**
+
+- `src/duplicates/hash.ts` — функция `computeContentHash(filePath: string): string` для вычисления SHA-256
+- `src/duplicates/types.ts` — типы `DuplicateEntry`, `DuplicateMode`
+- `src/duplicates/store.ts` — класс `DuplicateStore` с методами `add()`, `findByHash()`, `findDuplicates()`, `getAll()`, `remove()`
+
+**Настройка:**
+
+| Переменная окружения | По умолчанию | Описание |
+|---------------------|--------------|----------|
+| `DUPLICATE_MODE` | `skip` | Режим обработки дубликатов: `skip` (пропустить загрузку), `update` (заменить), `track` (сохранить обе версии с меткой) |
+
+**Изменения схемы:**
+
+- **LanceDB:** Добавлен столбец `status` (active/deprecated) и столбец `contentHash` в таблицу chunks; создаёт таблицу `duplicates` при первой вставке.
+- **PostgreSQL:** Добавлен столбец `status` в таблицу `chunks`; создаёт таблицу `duplicates` при `initialize()`.
+
+**Будущие возможности (в разработке):**
+
+- Инструменты MCP: `list_duplicates`, `cleanup_duplicates`
+- Подкоманды CLI: `duplicates list`, `duplicates cleanup`
+- Поле `isDuplicate` в `IngestedFileSummary` для `list_files`
+- Переменная окружения `DUPLICATE_MODE` с валидацией в `tool-input.ts`
+- Обновление `.env.example` — добавление `DUPLICATE_MODE=skip`
+- Unit-тесты для `computeContentHash()` и `DuplicateStore`
+- Integration-тесты для `handleIngestFile` с дубликатами
+- Обновление `openspec/specs/mcp-local-rag/spec.md` — добавление требований к дубликатам
+- Добавление примеров использования CLI-команд в документацию
+
+> **Примечание:** Интеграция обработки дубликатов в конвейер загрузки (Раздел 3 задач) в настоящее время находится в разработке. Тип `IngestResult` расширен полями `status` и `duplicateOf`. Схема и инфраструктура отслеживания готовы.
 
 ### Приоритет конфигурации
 1. CLI флаги

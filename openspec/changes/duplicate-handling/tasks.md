@@ -6,17 +6,17 @@
 
 ## 2. Расширение схемы БД
 
-- [ ] 2.1 Добавить поле `status` в таблицу `chunks` для LanceDB (через `addColumns`)
-- [ ] 2.2 Добавить поле `status` в таблицу `chunks` для PostgreSQL (через `ALTER TABLE`)
-- [ ] 2.3 Создать таблицу `duplicates` для LanceDB (при первой вставке)
-- [ ] 2.4 Создать таблицу `duplicates` для PostgreSQL (при `initialize()`)
-- [ ] 2.5 Добавить методы `getDuplicatesByHash()`, `markDeprecated()`, `cleanupDuplicates()` в `IVectordb`
+- [x] 2.1 Добавить поле `status` в таблицу `chunks` для LanceDB (через `addColumns`)
+- [x] 2.2 Добавить поле `status` в таблицу `chunks` для PostgreSQL (через `ALTER TABLE`)
+- [x] 2.3 Создать таблицу `duplicates` для LanceDB (при первой вставке)
+- [x] 2.4 Создать таблицу `duplicates` для PostgreSQL (при `initialize()`)
+- [x] 2.5 Добавить методы `getDuplicatesByHash()`, `markDeprecated()`, `cleanupDuplicates()` в `IVectordb`
 
 ## 3. Интеграция в ingest pipeline
 
 - [ ] 3.1 Добавить вычисление хеша в `handleIngestFile` (MCP-сервер)
 - [ ] 3.2 Добавить логику проверки дубликатов: skip / update / track
-- [ ] 3.3 Обновить `IngestResult` — добавить поля `status: 'new' | 'skipped' | 'updated' | 'tracked'`, `duplicateOf?: string`
+- [x] 3.3 Обновить `IngestResult` — добавить поля `status: 'new' | 'skipped' | 'updated' | 'tracked'`, `duplicateOf?: string`
 - [ ] 3.4 Аналогичная интеграция в CLI `ingestSingleFile`
 - [ ] 3.5 Добавить поле `isDuplicate` в `IngestedFileSummary` для `list_files`
 

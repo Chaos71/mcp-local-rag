@@ -60,6 +60,13 @@ export interface DocumentMetadata {
 }
 
 /**
+ * Chunk status — used to mark deprecated/removed chunks without physical deletion.
+ * - 'active': chunk is live and searchable
+ * - 'deprecated': chunk belongs to a replaced document version (soft-deleted)
+ */
+export type ChunkStatus = 'active' | 'deprecated'
+
+/**
  * Vector chunk
  */
 export interface VectorChunk {
@@ -79,6 +86,8 @@ export interface VectorChunk {
   fileTitle: string | null
   /** Ingestion timestamp (ISO 8601 format) */
   timestamp: string
+  /** Chunk status — 'active' or 'deprecated' (default: 'active') */
+  status?: ChunkStatus
 }
 
 /**
@@ -438,6 +447,47 @@ export interface IVectordb {
    * Close the database connection and release resources.
    */
   close(): Promise<void>
+
+  // ============================================
+  // Duplicate tracking methods (Section 2.5)
+  // ============================================
+
+  /**
+   * Find all chunks sharing the same content hash (duplicates).
+   * Returns groups of chunks where each group shares one `contentHash`.
+   * Only returns active (non-deprecated) chunks by default.
+   *
+   * @param contentHash — SHA-256 hash of file content
+   * @param includeDeprecated — include deprecated chunks in results (default: false)
+   * @returns Array of duplicate groups, each with shared hash and list of chunk paths
+   */
+  getDuplicatesByHash(
+    contentHash: string,
+    includeDeprecated?: boolean
+  ): Promise<
+    {
+      contentHash: string
+      filePaths: string[]
+      deprecatedFilePaths?: string[]
+    }[]
+  >
+
+  /**
+   * Mark all chunks for a given file path as 'deprecated' (soft-delete).
+   * Used when a document is replaced — old version is kept but hidden from search.
+   *
+   * @param filePath — file path to mark as deprecated
+   * @returns Number of chunks marked as deprecated
+   */
+  markDeprecated(filePath: string): Promise<number>
+
+  /**
+   * Remove all deprecated chunks from the database.
+   * Cleans up storage occupied by soft-deleted chunks.
+   *
+   * @returns Number of chunks removed
+   */
+  cleanupDuplicates(): Promise<number>
 }
 
 // ============================================

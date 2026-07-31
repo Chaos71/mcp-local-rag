@@ -55,6 +55,8 @@ interface PgChunksRow {
   timestamp: string
   embedding: string
   score: string | undefined
+  status: string | null
+  contentHash: string | null
 }
 
 /** Row returned from files table query */
@@ -81,6 +83,7 @@ const DEFAULT_TABLES = {
   chunks: 'chunks',
   files: 'files',
   metadata: 'metadata',
+  duplicates: 'duplicates',
 }
 
 /**
@@ -148,6 +151,8 @@ export function buildSchemaSQL(config: PostgreSQLVectorStoreConfig): string[] {
 
     // Chunks table — main storage for vectors and text
     // Note: embedding stored as VECTOR(dim), indexing may use halfvec conversion
+    // 2.2: Added 'status' column for soft-deletion (deprecated chunks)
+    // 2.2: Added 'contentHash' column for duplicate tracking
     `CREATE TABLE IF NOT EXISTS ${qualified(tableName, schema)} (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       file_path TEXT NOT NULL,
@@ -156,7 +161,9 @@ export function buildSchemaSQL(config: PostgreSQLVectorStoreConfig): string[] {
       embedding vector(${embeddingDim}) NOT NULL,
       file_title TEXT,
       timestamp TIMESTAMP NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW()
+      created_at TIMESTAMP DEFAULT NOW(),
+      status TEXT DEFAULT 'active',
+      contentHash TEXT
     )`,
 
     // Vector index for search
@@ -188,6 +195,24 @@ export function buildSchemaSQL(config: PostgreSQLVectorStoreConfig): string[] {
       ingested_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY (file_path) REFERENCES ${qualified(files, schema)}(file_path)
     )`,
+
+    // 2.4: Duplicates table — tracks document duplicates and their relationships
+    // Stores content hash, file paths, and links between duplicate versions
+    `CREATE TABLE IF NOT EXISTS ${qualified('duplicates', schema)} (
+      id SERIAL PRIMARY KEY,
+      content_hash TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      duplicate_of TEXT,
+      status TEXT DEFAULT 'active',
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(content_hash, file_path)
+    )`,
+
+    // Index for fast duplicate lookup by hash
+    `CREATE INDEX IF NOT EXISTS duplicates_content_hash_idx ON ${qualified('duplicates', schema)} (content_hash)`,
+
+    // Index for finding all versions of a document
+    `CREATE INDEX IF NOT EXISTS duplicates_duplicate_of_idx ON ${qualified('duplicates', schema)} (duplicate_of)`,
   ]
 }
 
@@ -965,6 +990,179 @@ export class PostgreSQLVectordb implements IVectordb {
       this.initialized = false
       this.ftsEnabled = false
       console.error('PostgreSQLVectordb connection closed')
+    }
+  }
+
+  // ============================================
+  // Duplicate tracking methods (Section 2.5)
+  // ============================================
+
+  /**
+   * Find all chunks sharing the same content hash (duplicates).
+   * Uses the dedicated `duplicates` table for efficient lookup.
+   *
+   * @param contentHash — SHA-256 hash of file content
+   * @param includeDeprecated — include deprecated chunks in results (default: false)
+   * @returns Array of duplicate groups, each with shared hash and list of chunk paths
+   */
+  async getDuplicatesByHash(
+    contentHash: string,
+    includeDeprecated = false
+  ): Promise<
+    {
+      contentHash: string
+      filePaths: string[]
+      deprecatedFilePaths?: string[]
+    }[]
+  > {
+    if (!this.pool || !this.initialized) {
+      return []
+    }
+
+    try {
+      const dupTable = qualified('duplicates', this.schema)
+      let whereClause = `content_hash = $1`
+      const params: (string | boolean)[] = [contentHash]
+
+      if (!includeDeprecated) {
+        whereClause += " AND (status IS NULL OR status = 'active')"
+      }
+
+      const result = await this.pool.query(
+        `SELECT DISTINCT file_path, status FROM ${dupTable} WHERE ${whereClause}`,
+        params
+      )
+
+      // Group by contentHash and separate active/deprecated filePaths
+      const groups = new Map<string, { active: string[]; deprecated: string[] }>()
+
+      for (const row of result.rows) {
+        const filePath = row.file_path
+        const status = row.status
+
+        if (typeof filePath !== 'string') continue
+
+        if (!groups.has(contentHash)) {
+          groups.set(contentHash, { active: [], deprecated: [] })
+        }
+        const group = groups.get(contentHash)!
+        if (status === 'deprecated') {
+          group.deprecated.push(filePath)
+        } else {
+          group.active.push(filePath)
+        }
+      }
+
+      return Array.from(groups.entries()).map(([hash, group]) => {
+        const result: {
+          contentHash: string
+          filePaths: string[]
+          deprecatedFilePaths?: string[]
+        } = {
+          contentHash: hash,
+          filePaths: group.active,
+        }
+        if (group.deprecated.length > 0) {
+          result.deprecatedFilePaths = group.deprecated
+        }
+        return result
+      })
+    } catch (error) {
+      console.error('PostgreSQLVectordb: getDuplicatesByHash failed:', error)
+      return []
+    }
+  }
+
+  /**
+   * Mark all chunks for a given file path as 'deprecated' (soft-delete).
+   * Updates the status column in the chunks table.
+   * Also updates the duplicates table if entries exist.
+   *
+   * @param filePath — file path to mark as deprecated
+   * @returns Number of chunks marked as deprecated
+   */
+  async markDeprecated(filePath: string): Promise<number> {
+    if (!this.pool || !this.initialized) {
+      console.error('PostgreSQLVectordb: Skipping markDeprecated as not initialized')
+      return 0
+    }
+
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+
+      // Mark chunks as deprecated
+      const chunksResult = await client.query(
+        `UPDATE ${qualified(this.tableName, this.schema)} SET status = 'deprecated' WHERE file_path = $1 RETURNING id`,
+        [filePath]
+      )
+      const deprecatedChunkCount = chunksResult.rowCount ?? 0
+
+      // Mark duplicates table entries as deprecated
+      const dupTable = qualified('duplicates', this.schema)
+      await client.query(
+        `UPDATE ${dupTable} SET status = 'deprecated' WHERE file_path = $1 AND (status IS NULL OR status = 'active')`,
+        [filePath]
+      )
+
+      await client.query('COMMIT')
+
+      if (deprecatedChunkCount > 0) {
+        console.error(
+          `PostgreSQLVectordb: Marked ${deprecatedChunkCount} chunks as deprecated for "${filePath}"`
+        )
+      }
+      return deprecatedChunkCount
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw new DatabaseError(
+        `Failed to mark chunks as deprecated for file: ${filePath}`,
+        error as Error
+      )
+    } finally {
+      client.release()
+    }
+  }
+
+  /**
+   * Remove all deprecated chunks from the database.
+   * Cleans up storage occupied by soft-deleted chunks.
+   *
+   * @returns Number of chunks removed
+   */
+  async cleanupDuplicates(): Promise<number> {
+    if (!this.pool || !this.initialized) {
+      console.error('PostgreSQLVectordb: Skipping cleanupDuplicates as not initialized')
+      return 0
+    }
+
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+
+      // Delete deprecated chunks from chunks table
+      const chunksResult = await client.query(
+        `DELETE FROM ${qualified(this.tableName, this.schema)} WHERE status = 'deprecated' RETURNING id`
+      )
+      const deprecatedChunkCount = chunksResult.rowCount ?? 0
+
+      // Delete deprecated entries from duplicates table
+      const dupTable = qualified('duplicates', this.schema)
+      const dupResult = await client.query(`DELETE FROM ${dupTable} WHERE status = 'deprecated'`)
+      const deprecatedDupCount = dupResult.rowCount ?? 0
+
+      await client.query('COMMIT')
+
+      const totalRemoved = deprecatedChunkCount + deprecatedDupCount
+      console.error(
+        `PostgreSQLVectordb: Cleaned up ${totalRemoved} deprecated entries (${deprecatedChunkCount} chunks, ${deprecatedDupCount} duplicates)`
+      )
+      return totalRemoved
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw new DatabaseError('Failed to cleanup duplicates', error as Error)
+    } finally {
+      client.release()
     }
   }
 
