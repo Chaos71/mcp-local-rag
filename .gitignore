@@ -56,3 +56,5 @@ docs/
 .kilocode/
 .qwen/
 .roo/
+.kilo/
+.husky/
