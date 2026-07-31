@@ -684,11 +684,43 @@ VECTORDB_BACKEND=postgresql PG_HOST=localhost PG_DATABASE=mcp_local_rag \
 
 mcp-local-rag tracks document duplicates using SHA-256 content hashing. When the same file (by content) is ingested multiple times, the system can either skip it, update the existing entry, or track both versions.
 
+**Modes:**
+
+| Mode | Behavior |
+|------|----------|
+| `skip` (default) | Skip loading, return a warning |
+| `update` | Update existing document (mark old chunks as deprecated) |
+| `track` | Save both instances with a duplicate mark |
+
 **Configuration:**
 
-| Environment Variable | Default | Description |
-|---------------------|---------|-------------|
-| `DUPLICATE_MODE` | `skip` | Mode for handling duplicates: `skip` (skip loading), `update` (replace), `track` (save both with a mark) |
+Via environment variable:
+```bash
+export DUPLICATE_MODE=skip
+```
+
+Via CLI flag (ingest subcommand):
+```bash
+npx mcp-local-rag --duplicate-mode update ingest ./docs/
+```
+
+**CLI Output:**
+
+When ingesting a duplicate file, the CLI shows the status:
+```
+[1/3] ./docs/guide.pdf ... OK (42 chunks)
+[2/3] ./docs/guide.pdf ... OK (42 chunks) (updated, dup: ./docs/guide.pdf)
+[3/3] ./docs/other.pdf ... OK (15 chunks)
+```
+
+**Mechanism:**
+
+1. SHA-256 content hash is computed before chunking
+2. `vectorStore.getDuplicatesByHash()` checks for existing duplicates in the database
+3. When a duplicate is found, the configured mode is applied:
+   - `skip`: loading is cancelled, chunks are not inserted
+   - `update`: old chunks are marked as deprecated via `vectorStore.markDeprecated()`
+   - `track`: both instances are saved without changes
 
 **Schema Changes:**
 
@@ -697,10 +729,11 @@ mcp-local-rag tracks document duplicates using SHA-256 content hashing. When the
 
 **Implemented:**
 
-- SHA-256 content hash computation in `handleIngestFile` via `computeContentHash()`
+- SHA-256 content hash computation in `handleIngestFile` (MCP server) and `ingestSingleFile` (CLI) via `computeContentHash()`
 - `IngestResult.contentHash` field: SHA-256 hex digest (64 characters) or `null` if computation failed
 - `IngestResult.status` field: `'new' | 'skipped' | 'updated' | 'tracked'`
-- Duplicate detection logic in ingest pipeline with `DUPLICATE_MODE` support
+- Duplicate detection logic in ingest pipeline with `DUPLICATE_MODE` support (both MCP and CLI)
+- CLI `--duplicate-mode` flag for ingest subcommand
 - `DuplicateStore` class with `add()`, `findByHash()`, `findDuplicates()`, `getAll()`, `remove()` methods
 
 **Pending (next iteration):**

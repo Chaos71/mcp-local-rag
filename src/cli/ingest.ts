@@ -4,6 +4,8 @@ import { stat } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 
 import { SemanticChunker } from '../chunker/index.js'
+import { computeContentHash } from '../duplicates/hash.js'
+import { DEFAULT_DUPLICATE_MODE, type DuplicateMode } from '../duplicates/types.js'
 import type { IEmbedder } from '../embedder/index.js'
 import { buildChunksAndEmbeddings, buildVectorChunks } from '../ingest/compute.js'
 import { prepareVisualPdfChunks } from '../ingest/visual.js'
@@ -42,6 +44,8 @@ interface IngestConfig {
   modelName: string
   maxFileSize: number
   chunkMinLength?: number
+  /** Mode for handling duplicate documents during ingestion. */
+  duplicateMode?: DuplicateMode
 }
 
 interface IngestSummary {
@@ -66,6 +70,25 @@ interface IngestCliOptions {
    * of silently coercing for non-PDF files). Defaults to `'fast'`.
    */
   visualQuality?: QualityProfile | undefined
+  /**
+   * Mode for handling duplicate documents during ingestion.
+   * - `skip`: Skip loading, return a warning (default)
+   * - `update`: Update existing document (current behavior)
+   * - `track`: Save both instances with a duplicate mark
+   */
+  duplicateMode?: DuplicateMode
+}
+
+/**
+ * Result of ingesting a single file with duplicate handling.
+ */
+interface IngestSingleFileResult {
+  /** Number of chunks inserted */
+  chunkCount: number
+  /** Status indicating how the ingest handled duplicates */
+  status: 'new' | 'skipped' | 'updated' | 'tracked'
+  /** File path of the original document this is a duplicate of (only set when status is 'skipped', 'updated', or 'tracked') */
+  duplicateOf?: string
 }
 
 interface ParsedArgs {
@@ -96,6 +119,7 @@ Options:
   --chunk-min-length <n>     Minimum chunk length in characters (default: 50, range: 1-10000)
   --visual                   Enable VLM captioning for PDF figure pages (PDFs only; no effect on other types)
   --visual-quality <profile> VLM profile when --visual is set: fast (default, lightweight) or quality (Qwen2.5-VL-3B, ~10x cache, ~2x inference)
+  --duplicate-mode <mode>    Duplicate handling mode: skip (default), update, track
   -h, --help                 Show this help
 
 Global options (must appear before "ingest"):
@@ -177,6 +201,18 @@ export function parseArgs(args: string[]): ParsedArgs {
         i += 2
         break
       }
+      case '--duplicate-mode': {
+        const value = requireFlagValue(args, i, '--duplicate-mode')
+        if (value !== 'skip' && value !== 'update' && value !== 'track') {
+          console.error(
+            `Invalid value for --duplicate-mode: "${value.slice(0, 100)}". Expected "skip", "update", or "track".`
+          )
+          process.exit(1)
+        }
+        options.duplicateMode = value as DuplicateMode
+        i += 2
+        break
+      }
       default:
         if (arg.startsWith('-')) {
           console.error(`Unknown option: ${arg}`)
@@ -247,6 +283,8 @@ export async function resolveConfig(
     (process.env['CHUNK_MIN_LENGTH']
       ? Number.parseInt(process.env['CHUNK_MIN_LENGTH'], 10)
       : undefined)
+  const duplicateMode =
+    ingestOptions.duplicateMode ?? (process.env['DUPLICATE_MODE'] as DuplicateMode | undefined)
 
   // Validate maxFileSize range
   const maxFileSizeError = validateMaxFileSize(maxFileSize)
@@ -264,6 +302,19 @@ export async function resolveConfig(
     }
   }
 
+  // Validate duplicateMode value
+  if (
+    duplicateMode &&
+    duplicateMode !== 'skip' &&
+    duplicateMode !== 'update' &&
+    duplicateMode !== 'track'
+  ) {
+    console.error(
+      `Invalid DUPLICATE_MODE "${duplicateMode}". Expected "skip", "update", or "track".`
+    )
+    process.exit(1)
+  }
+
   const resolved: IngestConfig = {
     dbPath: globalConfig.dbPath,
     cacheDir: globalConfig.cacheDir,
@@ -274,6 +325,9 @@ export async function resolveConfig(
   }
   if (chunkMinLength !== undefined) {
     resolved.chunkMinLength = chunkMinLength
+  }
+  if (duplicateMode !== undefined) {
+    resolved.duplicateMode = duplicateMode
   }
   return resolved
 }
@@ -295,17 +349,18 @@ export async function resolveConfig(
  * accidental misuse at compile time, which was the original goal.
  */
 export type IngestSingleFileOptions =
-  | { visual?: false | undefined }
+  | { visual?: false | undefined; duplicateMode?: DuplicateMode | undefined }
   | {
       visual: true
       profile: QualityProfile
       cacheDir: string
       device?: string | undefined
+      duplicateMode?: DuplicateMode | undefined
     }
 
 /**
  * Ingest a single file: parse, chunk, embed, delete old chunks, insert new chunks.
- * Returns the number of chunks inserted.
+ * Returns the result including chunk count and duplicate handling status.
  *
  * When `options.visual === true` AND the file is a `.pdf`, routes through the
  * visual-enrichment path: `parsePdfPages` + VLM captioning (`pdf-visual`
@@ -315,6 +370,10 @@ export type IngestSingleFileOptions =
  *
  * Non-visual, non-PDF, and `visual: true` + non-PDF paths all use the default
  * text-only branch and never load `pdf-visual`.
+ *
+ * Duplicate handling: computes SHA-256 content hash before chunking, checks
+ * for existing duplicates via `vectorStore.getDuplicatesByHash()`, and applies
+ * the configured `duplicateMode` (skip / update / track).
  */
 export async function ingestSingleFile(
   filePath: string,
@@ -323,7 +382,23 @@ export async function ingestSingleFile(
   embedder: IEmbedder,
   vectorStore: VectorStore | PostgreSQLVectordb,
   options?: IngestSingleFileOptions
-): Promise<number> {
+): Promise<IngestSingleFileResult> {
+  // Resolve duplicate mode: CLI option > env var > default
+  const duplicateMode =
+    options?.duplicateMode ??
+    (process.env['DUPLICATE_MODE'] as DuplicateMode | undefined) ??
+    DEFAULT_DUPLICATE_MODE
+
+  // 3.1: Compute content hash for duplicate detection
+  let contentHash: string | null = null
+  try {
+    contentHash = await computeContentHash(filePath)
+    console.error(`Content hash computed: ${contentHash}`)
+  } catch (hashError) {
+    console.error(`Failed to compute content hash: ${hashError}`)
+    // Continue without hash — duplicate detection will be skipped
+  }
+
   // Parse file
   const isPdf = filePath.toLowerCase().endsWith('.pdf')
   let text: string
@@ -346,7 +421,7 @@ export async function ingestSingleFile(
     const { chunks, embeddings } = visualResult
     if (chunks.length === 0) {
       console.error(`  Warning: 0 chunks generated (file may be empty or too short)`)
-      return 0
+      return { chunkCount: 0, status: 'new' }
     }
     title = visualResult.title
 
@@ -368,7 +443,15 @@ export async function ingestSingleFile(
     console.error(
       `  [visual chunk+embed] ${(performance.now() - tVisual).toFixed(1)}ms (${vectorChunks.length} chunks)`
     )
-    return vectorChunks.length
+
+    // 3.2: Duplicate handling for visual path
+    return ingestSingleFileResult(
+      vectorStore,
+      contentHash,
+      duplicateMode,
+      filePath,
+      vectorChunks.length
+    )
   } else if (isPdf) {
     const result = await parser.parsePdf(filePath, embedder)
     text = result.content
@@ -384,7 +467,7 @@ export async function ingestSingleFile(
   const { chunks, embeddings } = await buildChunksAndEmbeddings(text, chunker, embedder)
   if (chunks.length === 0) {
     console.error(`  Warning: 0 chunks generated (file may be empty or too short)`)
-    return 0
+    return { chunkCount: 0, status: 'new' }
   }
   console.error(
     `  [chunk+embed] ${(performance.now() - tChunk).toFixed(1)}ms (${chunks.length} chunks)`
@@ -405,7 +488,95 @@ export async function ingestSingleFile(
   // Insert chunks
   await vectorStore.insertChunks(vectorChunks)
 
-  return vectorChunks.length
+  // 3.2: Логика проверки дубликатов
+  return ingestSingleFileResult(
+    vectorStore,
+    contentHash,
+    duplicateMode,
+    filePath,
+    vectorChunks.length
+  )
+}
+
+/**
+ * Helper: apply duplicate handling logic and return the result.
+ *
+ * Checks for existing duplicates via `vectorStore.getDuplicatesByHash()`,
+ * applies the configured `duplicateMode` (skip / update / track), and
+ * returns an `IngestSingleFileResult` with the appropriate status.
+ */
+async function ingestSingleFileResult(
+  vectorStore: VectorStore | PostgreSQLVectordb,
+  contentHash: string | null,
+  duplicateMode: DuplicateMode,
+  filePath: string,
+  chunkCount: number
+): Promise<IngestSingleFileResult> {
+  let resultStatus: 'new' | 'skipped' | 'updated' | 'tracked' = 'new'
+  let duplicateOf: string | undefined
+
+  if (contentHash) {
+    try {
+      const duplicates = await vectorStore.getDuplicatesByHash(contentHash, true)
+
+      if (duplicates.length > 0) {
+        // Дубликат найден — применяем режим обработки
+        const duplicateGroup = duplicates[0]
+        if (duplicateGroup) {
+          // Берём первый активный файл как оригинал
+          const originalFilePath =
+            duplicateGroup.filePaths.find((p) => p !== filePath) ?? duplicateGroup.filePaths[0]
+
+          if (originalFilePath) {
+            duplicateOf = originalFilePath
+
+            switch (duplicateMode) {
+              case 'skip': {
+                // Пропустить загрузку, вернуть предупреждение
+                resultStatus = 'skipped'
+                console.error(
+                  `Ingest skipped (duplicate): ${filePath} (mode: skip, original: ${originalFilePath})`
+                )
+                break
+              }
+
+              case 'update':
+                // Обновить существующий документ: пометить старые как deprecated
+                await vectorStore.markDeprecated(originalFilePath)
+                resultStatus = 'updated'
+                console.error(
+                  `Ingest updated (duplicate): ${filePath} (mode: update, original: ${originalFilePath})`
+                )
+                break
+
+              case 'track':
+                // Сохранить оба экземпляра с пометкой о дубликате
+                resultStatus = 'tracked'
+                console.error(
+                  `Ingest tracked (duplicate): ${filePath} (mode: track, original: ${originalFilePath})`
+                )
+                break
+
+              default:
+                // Неизвестный режим — treat as 'new'
+                resultStatus = 'new'
+                console.error(`Unknown DUPLICATE_MODE "${duplicateMode}", treating as 'new'`)
+                break
+            }
+          }
+        }
+      }
+    } catch (duplicateCheckError) {
+      // Если метод не поддерживается (старая схема), продолжаем как 'new'
+      console.error(`Failed to check duplicates: ${duplicateCheckError}`)
+    }
+  }
+
+  return {
+    chunkCount,
+    status: resultStatus,
+    ...(duplicateOf ? { duplicateOf } : {}),
+  }
 }
 
 // ============================================
@@ -507,9 +678,10 @@ export async function runIngest(args: string[], globalOptions: GlobalOptions = {
               profile: options.visualQuality ?? 'fast',
               cacheDir: globalConfig.cacheDir,
               device: resolveDevice(process.env['RAG_DEVICE']),
+              duplicateMode: config.duplicateMode,
             }
-          : { visual: false }
-        const chunkCount = await ingestSingleFile(
+          : { visual: false, duplicateMode: config.duplicateMode }
+        const result = await ingestSingleFile(
           filePath,
           parser,
           chunker,
@@ -517,14 +689,19 @@ export async function runIngest(args: string[], globalOptions: GlobalOptions = {
           vectorStore,
           ingestOptions
         )
-        if (chunkCount === 0) {
+        if (result.chunkCount === 0) {
           // 0 chunks is a skip/warning, not a failure
           console.error(`${label} ${filePath} ... SKIPPED (0 chunks)`)
           summary.succeeded++
         } else {
-          console.error(`${label} ${filePath} ... OK (${chunkCount} chunks)`)
+          // Show duplicate status if applicable
+          const statusSuffix =
+            result.status !== 'new'
+              ? ` (${result.status}${result.duplicateOf ? `, dup: ${result.duplicateOf}` : ''})`
+              : ''
+          console.error(`${label} ${filePath} ... OK (${result.chunkCount} chunks)${statusSuffix}`)
           summary.succeeded++
-          summary.totalChunks += chunkCount
+          summary.totalChunks += result.chunkCount
         }
       } catch (error) {
         const reason = formatCliError(error)
