@@ -15,7 +15,7 @@
 ## 3. Интеграция в ingest pipeline
 
 - [x] 3.1 Добавить вычисление хеша в `handleIngestFile` (MCP-сервер)
-- [ ] 3.2 Добавить логику проверки дубликатов: skip / update / track
+- [x] 3.2 Добавить логику проверки дубликатов: skip / update / track
 - [x] 3.3 Обновить `IngestResult` — добавить поля `status: 'new' | 'skipped' | 'updated' | 'tracked'`, `duplicateOf?: string`
 - [ ] 3.4 Аналогичная интеграция в CLI `ingestSingleFile`
 - [ ] 3.5 Добавить поле `isDuplicate` в `IngestedFileSummary` для `list_files`

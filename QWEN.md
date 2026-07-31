@@ -123,6 +123,7 @@ src/
 | `PG_SCHEMA` | `public` | Схема PostgreSQL (для мульти-тенантных сценариев) |
 | `RAG_EMBEDDING_DIMENSIONS` | `384` | Размерность эмбеддингов для pgvector |
 | `RAG_IVF_LISTS` | `100` | Количество списков IVFFlat индекса |
+| `DUPLICATE_MODE` | `skip` | Режим обработки дубликатов: `skip` (пропустить), `update` (обновить), `track` (сохранить оба) |
 
 ### Локальные LLM через llama.cpp
 
@@ -223,19 +224,18 @@ mcp-local-rag отслеживает дубликаты документов с 
 - **LanceDB:** Добавлен столбец `status` (active/deprecated) и столбец `contentHash` в таблицу chunks; создаёт таблицу `duplicates` при первой вставке.
 - **PostgreSQL:** Добавлен столбец `status` в таблицу `chunks`; создаёт таблицу `duplicates` при `initialize()`.
 
-**Будущие возможности (в разработке):**
+**В следующей итерации:**
 
 - Инструменты MCP: `list_duplicates`, `cleanup_duplicates`
 - Подкоманды CLI: `duplicates list`, `duplicates cleanup`
 - Поле `isDuplicate` в `IngestedFileSummary` для `list_files`
-- Переменная окружения `DUPLICATE_MODE` с валидацией в `tool-input.ts`
-- Обновление `.env.example` — добавление `DUPLICATE_MODE=skip`
+- Валидация `DUPLICATE_MODE` в `tool-input.ts`
 - Unit-тесты для `computeContentHash()` и `DuplicateStore`
 - Integration-тесты для `handleIngestFile` с дубликатами
 - Обновление `openspec/specs/mcp-local-rag/spec.md` — добавление требований к дубликатам
 - Добавление примеров использования CLI-команд в документацию
 
-> **Примечание:** Интеграция обработки дубликатов в конвейер загрузки (Раздел 3 задач) в настоящее время находится в разработке. Тип `IngestResult` расширен полями `status` и `duplicateOf`. Схема и инфраструктура отслеживания готовы.
+> **Примечание:** Основная интеграция обработки дубликатов в конвейер загрузки (Разделы 1–3.3) завершена. Тип `IngestResult` расширен полями `status` и `duplicateOf`. Схема и инфраструктура отслеживания готовы.
 
 ### Приоритет конфигурации
 1. CLI флаги

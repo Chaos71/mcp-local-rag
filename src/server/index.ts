@@ -13,6 +13,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { DEFAULT_MIN_CHUNK_LENGTH, SemanticChunker } from '../chunker/index.js'
 import { computeContentHash } from '../duplicates/hash.js'
+import { DEFAULT_DUPLICATE_MODE, type DuplicateMode } from '../duplicates/types.js'
 import { createEmbedder } from '../embedder/factory.js'
 import type { Embedder, IEmbedder } from '../embedder/index.js'
 import type { EmbeddingBackend, LlamaCppConfig } from '../embedder/types.js'
@@ -134,9 +135,13 @@ export class RAGServer {
   private readonly configError: BaseDirsConfigError | null
   private readonly minChunkLength: number
   private readonly device: string | undefined
+  /** Mode for handling duplicate documents during ingestion. */
+  private readonly duplicateMode: DuplicateMode
 
   constructor(config: RAGServerConfig) {
     this.dbPath = config.dbPath
+    // Duplicate mode: read from environment variable, fall back to default
+    this.duplicateMode = (process.env['DUPLICATE_MODE'] as DuplicateMode) ?? DEFAULT_DUPLICATE_MODE
     // Normalize both config shapes into a single `baseDirs: string[]` plus the
     // legacy single-root accessor. See `normalizeBaseDirs` for the degraded-
     // mode and misuse semantics.
@@ -543,6 +548,76 @@ export class RAGServer {
       throw insertError
     }
 
+    // 3.2: Логика проверки дубликатов
+    let resultStatus: 'new' | 'skipped' | 'updated' | 'tracked' = 'new'
+    let duplicateOf: string | undefined
+
+    if (contentHash) {
+      try {
+        const duplicates = await this.vectorStore.getDuplicatesByHash(contentHash, true)
+
+        if (duplicates.length > 0) {
+          // Дубликат найден — применяем режим обработки
+          const duplicateGroup = duplicates[0]
+          if (duplicateGroup) {
+            // Берём первый активный файл как оригинал
+            const originalFilePath =
+              duplicateGroup.filePaths.find((p) => p !== args.filePath) ??
+              duplicateGroup.filePaths[0]
+
+            if (originalFilePath) {
+              duplicateOf = originalFilePath
+
+              switch (this.duplicateMode) {
+                case 'skip': {
+                  // Пропустить загрузку, вернуть предупреждение
+                  // Отменяем вставку (rollback)
+                  // Примечание: backup имеет тип never из-за TypeScript control flow analysis
+                  // (backup = null в success path). Используем type assertion.
+                  const bk = backup as unknown as VectorChunk[] | null
+                  if (bk != null && bk.length > 0) {
+                    await this.vectorStore.insertChunks(bk)
+                    await this.vectorStore.optimize()
+                  }
+                  resultStatus = 'skipped'
+                  console.error(
+                    `Ingest skipped (duplicate): ${args.filePath} (mode: skip, original: ${originalFilePath})`
+                  )
+                  break
+                }
+
+                case 'update':
+                  // Обновить существующий документ: пометить старые как deprecated
+                  await this.vectorStore.markDeprecated(originalFilePath)
+                  resultStatus = 'updated'
+                  console.error(
+                    `Ingest updated (duplicate): ${args.filePath} (mode: update, original: ${originalFilePath})`
+                  )
+                  break
+
+                case 'track':
+                  // Сохранить оба экземпляра с пометкой о дубликате
+                  resultStatus = 'tracked'
+                  console.error(
+                    `Ingest tracked (duplicate): ${args.filePath} (mode: track, original: ${originalFilePath})`
+                  )
+                  break
+
+                default:
+                  // Неизвестный режим — treat as 'new'
+                  resultStatus = 'new'
+                  console.error(`Unknown DUPLICATE_MODE "${this.duplicateMode}", treating as 'new'`)
+                  break
+              }
+            }
+          }
+        }
+      } catch (duplicateCheckError) {
+        // Если метод не поддерживается (старая схема), продолжаем как 'new'
+        console.error(`Failed to check duplicates: ${duplicateCheckError}`)
+      }
+    }
+
     // Result
     const result: IngestResult = {
       filePath: args.filePath,
@@ -550,7 +625,8 @@ export class RAGServer {
       timestamp: new Date().toISOString(),
       fileTitle: title || null,
       contentHash,
-      status: 'new', // 3.1: по умолчанию 'new'; 3.2 обновит при обнаружении дубликата
+      status: resultStatus,
+      ...(duplicateOf ? { duplicateOf } : {}),
     }
 
     return {

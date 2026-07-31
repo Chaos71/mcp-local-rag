@@ -695,18 +695,22 @@ mcp-local-rag tracks document duplicates using SHA-256 content hashing. When the
 - **LanceDB:** Added `status` column (active/deprecated) and `contentHash` column to chunks table; creates `duplicates` table on first insertion.
 - **PostgreSQL:** Added `status` column to `chunks` table; creates `duplicates` table during `initialize()`.
 
-**Implemented (Section 3.1):**
+**Implemented:**
 
 - SHA-256 content hash computation in `handleIngestFile` via `computeContentHash()`
 - `IngestResult.contentHash` field: SHA-256 hex digest (64 characters) or `null` if computation failed
+- `IngestResult.status` field: `'new' | 'skipped' | 'updated' | 'tracked'`
+- Duplicate detection logic in ingest pipeline with `DUPLICATE_MODE` support
+- `DuplicateStore` class with `add()`, `findByHash()`, `findDuplicates()`, `getAll()`, `remove()` methods
 
-**Future Features (in progress):**
+**Pending (next iteration):**
 
 - MCP tools: `list_duplicates`, `cleanup_duplicates`
 - CLI subcommands: `duplicates list`, `duplicates cleanup`
-- `IngestResult.status` field: `'new' | 'skipped' | 'updated' | 'tracked'`
-
-> **Note:** Duplicate handling integration in the ingest pipeline (Section 3) is partially complete. Hash computation (3.1) is implemented; duplicate detection logic (3.2) is pending.
+- `isDuplicate` field in `IngestedFileSummary` for `list_files`
+- `DUPLICATE_MODE` validation in `tool-input.ts`
+- Unit tests for `computeContentHash()` and `DuplicateStore`
+- Integration tests for `handleIngestFile` with duplicates
 
 ### Document Roots (`BASE_DIR` and `BASE_DIRS`)
 

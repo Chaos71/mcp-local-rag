@@ -811,18 +811,22 @@ mcp-local-rag отслеживает дубликаты документов с 
 - **LanceDB:** Добавлен столбец `status` (active/deprecated) и столбец `contentHash` в таблицу chunks; создаёт таблицу `duplicates` при первой вставке.
 - **PostgreSQL:** Добавлен столбец `status` в таблицу `chunks`; создаёт таблицу `duplicates` при `initialize()`.
 
-**Реализовано (Раздел 3.1):**
+**Реализовано:**
 
 - Вычисление хеша содержимого SHA-256 в `handleIngestFile` через `computeContentHash()`
 - Поле `IngestResult.contentHash`: SHA-256 hex digest (64 символа) или `null` при ошибке вычисления
+- Поле `IngestResult.status`: `'new' | 'skipped' | 'updated' | 'tracked'`
+- Логика обнаружения дубликатов в конвейере загрузки с поддержкой `DUPLICATE_MODE`
+- Класс `DuplicateStore` с методами `add()`, `findByHash()`, `findDuplicates()`, `getAll()`, `remove()`
 
-**Будущие возможности (в разработке):**
+**В следующей итерации:**
 
 - Инструменты MCP: `list_duplicates`, `cleanup_duplicates`
 - Подкоманды CLI: `duplicates list`, `duplicates cleanup`
-- Поле `IngestResult.status`: `'new' | 'skipped' | 'updated' | 'tracked'`
-
-> **Примечание:** Интеграция обработки дубликатов в конвейер загрузки (Раздел 3) частично завершена. Вычисление хеша (3.1) реализовано; логика обнаружения дубликатов (3.2) в ожидании.
+- Поле `isDuplicate` в `IngestedFileSummary` для `list_files`
+- Валидация `DUPLICATE_MODE` в `tool-input.ts`
+- Unit-тесты для `computeContentHash()` и `DuplicateStore`
+- Integration-тесты для `handleIngestFile` с дубликатами
 
 ### Корневые директории документов (`BASE_DIR` и `BASE_DIRS`)
 
