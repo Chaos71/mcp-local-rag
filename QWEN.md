@@ -272,12 +272,15 @@ mcp-local-rag отслеживает дубликаты документов с 
 
 - Инструменты MCP: `list_duplicates`, `cleanup_duplicates`
 - Подкоманды CLI: `duplicates list`, `duplicates cleanup`
-- Поле `isDuplicate` в `IngestedFileSummary` для `list_files`
 - Валидация `DUPLICATE_MODE` в `tool-input.ts`
 - Unit-тесты для `computeContentHash()` и `DuplicateStore`
 - Integration-тесты для `handleIngestFile` с дубликатами
 - Обновление `openspec/specs/mcp-local-rag/spec.md` — добавление требований к дубликатам
 - Добавление примеров использования CLI-команд в документацию
+
+**Поле `isDuplicate` в `IngestedFileSummary`:**
+
+Добавлено поле `isDuplicate: boolean` в интерфейс `IngestedFileSummary` (файл `src/features/list.ts`). Возвращается в ответе инструмента `list_files` и в CLI-подкоманде `list`. Определяется на основе таблицы `duplicates` (PostgreSQL) или через `getDuplicatesByHash()` (LanceDB).
 
 > **Примечание:** Основная интеграция обработки дубликатов в конвейер загрузки (Разделы 1–3.3) завершена. Тип `IngestResult` расширен полями `status` и `duplicateOf`. Схема и инфраструктура отслеживания готовы.
 

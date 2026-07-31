@@ -5,6 +5,8 @@ export interface IngestedFileSummary {
   filePath: string
   chunkCount: number
   timestamp: string
+  /** Indicates whether this file is a duplicate (same contentHash as another ingested file) */
+  isDuplicate: boolean
 }
 
 export type ListedFile =
@@ -14,6 +16,7 @@ export type ListedFile =
       ingested: true
       chunkCount: number
       timestamp: string
+      isDuplicate: boolean
     }
   | { filePath: string; baseDir: string; ingested: false }
 
@@ -62,6 +65,7 @@ export async function listDocuments(input: {
           ingested: true,
           chunkCount: entry.chunkCount,
           timestamp: entry.timestamp,
+          isDuplicate: entry.isDuplicate,
         })
       } else {
         files.push({ filePath: scannedPath, baseDir, ingested: false })

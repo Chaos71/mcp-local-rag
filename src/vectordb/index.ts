@@ -496,7 +496,9 @@ export class VectorStore implements IVectordb {
    *
    * @returns Array of file information
    */
-  async listFiles(): Promise<{ filePath: string; chunkCount: number; timestamp: string }[]> {
+  async listFiles(): Promise<
+    { filePath: string; chunkCount: number; timestamp: string; isDuplicate?: boolean }[]
+  > {
     if (!this.table) {
       return [] // Return empty array if table doesn't exist
     }
@@ -532,11 +534,33 @@ export class VectorStore implements IVectordb {
         }
       }
 
+      // Determine which files are duplicates using getDuplicatesByHash
+      // This method groups chunks by contentHash and identifies duplicates
+      const duplicateGroups = await this.getDuplicatesByHash('', true)
+      const duplicateFilePaths = new Set<string>()
+
+      for (const group of duplicateGroups) {
+        // If there are multiple files with the same contentHash, they are duplicates
+        if (group.filePaths.length > 1) {
+          // Mark all but the first (original) as duplicates
+          for (let i = 1; i < group.filePaths.length; i++) {
+            duplicateFilePaths.add(group.filePaths[i])
+          }
+        }
+        // Also mark deprecated files as duplicates
+        if (group.deprecatedFilePaths) {
+          for (const filePath of group.deprecatedFilePaths) {
+            duplicateFilePaths.add(filePath)
+          }
+        }
+      }
+
       // Convert Map to array of objects
       return Array.from(fileMap.entries()).map(([filePath, info]) => ({
         filePath,
         chunkCount: info.chunkCount,
         timestamp: info.timestamp,
+        isDuplicate: duplicateFilePaths.has(filePath),
       }))
     } catch (error) {
       throw new DatabaseError('Failed to list files', error as Error)

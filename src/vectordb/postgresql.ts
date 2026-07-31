@@ -861,8 +861,11 @@ export class PostgreSQLVectordb implements IVectordb {
   /**
    * Return a list of ingested files with their chunk counts.
    * Queries the dedicated files table (no aggregation over chunks).
+   * Also checks the duplicates table to mark duplicate files.
    */
-  async listFiles(): Promise<{ filePath: string; chunkCount: number; timestamp: string }[]> {
+  async listFiles(): Promise<
+    { filePath: string; chunkCount: number; timestamp: string; isDuplicate?: boolean }[]
+  > {
     if (!this.pool || !this.initialized) {
       return []
     }
@@ -872,10 +875,24 @@ export class PostgreSQLVectordb implements IVectordb {
         `SELECT file_path, chunk_count, timestamp FROM ${qualified('files', this.schema)} ORDER BY file_path`
       )
 
+      // Fetch duplicate info from the duplicates table
+      const duplicateFilePaths = new Set<string>()
+      try {
+        const dupResult = await this.pool.query(
+          `SELECT file_path FROM ${qualified('duplicates', this.schema)} WHERE status = 'duplicate' OR status = 'deprecated'`
+        )
+        for (const row of dupResult.rows) {
+          duplicateFilePaths.add(row.file_path)
+        }
+      } catch {
+        // duplicates table doesn't exist yet — skip duplicate detection
+      }
+
       return result.rows.map((row: PgFilesRow) => ({
         filePath: row.file_path,
         chunkCount: parseInt(row.chunk_count, 10),
         timestamp: row.timestamp,
+        isDuplicate: duplicateFilePaths.has(row.file_path),
       }))
     } catch (error) {
       throw new DatabaseError('Failed to list files', error as Error)

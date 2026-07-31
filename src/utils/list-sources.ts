@@ -17,7 +17,7 @@ import { matchesAnyScope } from './scope-match.js'
  * caller's richer row type is consumed structurally.
  */
 export interface KeyedIngestedEntry {
-  entry: { filePath: string; chunkCount: number; timestamp: string }
+  entry: { filePath: string; chunkCount: number; timestamp: string; isDuplicate?: boolean }
   key: string
 }
 
@@ -27,8 +27,8 @@ export interface KeyedIngestedEntry {
  * the `SourceEntry` union both surfaces already return (no type-move refactor).
  */
 export type ClassifiedSource =
-  | { source: string; chunkCount: number; timestamp: string }
-  | { filePath: string; chunkCount: number; timestamp: string }
+  | { source: string; chunkCount: number; timestamp: string; isDuplicate?: boolean }
+  | { filePath: string; chunkCount: number; timestamp: string; isDuplicate?: boolean }
 
 /**
  * Classify the ingested entries that matched no scanned file into `sources`.
@@ -69,8 +69,19 @@ export function classifyIngestedSources(
     .map(({ entry }) => {
       if (isManagedRawDataPath(entry.filePath, dbPath)) {
         const source = extractSourceFromPath(entry.filePath)
-        if (source) return { source, chunkCount: entry.chunkCount, timestamp: entry.timestamp }
+        if (source)
+          return {
+            source,
+            chunkCount: entry.chunkCount,
+            timestamp: entry.timestamp,
+            isDuplicate: entry.isDuplicate,
+          }
       }
-      return { filePath: entry.filePath, chunkCount: entry.chunkCount, timestamp: entry.timestamp }
+      return {
+        filePath: entry.filePath,
+        chunkCount: entry.chunkCount,
+        timestamp: entry.timestamp,
+        isDuplicate: entry.isDuplicate,
+      }
     })
 }

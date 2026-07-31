@@ -735,12 +735,12 @@ When ingesting a duplicate file, the CLI shows the status:
 - Duplicate detection logic in ingest pipeline with `DUPLICATE_MODE` support (both MCP and CLI)
 - CLI `--duplicate-mode` flag for ingest subcommand
 - `DuplicateStore` class with `add()`, `findByHash()`, `findDuplicates()`, `getAll()`, `remove()` methods
+- `isDuplicate` field in `IngestedFileSummary` for `list_files` — returned in `list_files` tool response and CLI `list` output
 
 **Pending (next iteration):**
 
 - MCP tools: `list_duplicates`, `cleanup_duplicates`
 - CLI subcommands: `duplicates list`, `duplicates cleanup`
-- `isDuplicate` field in `IngestedFileSummary` for `list_files`
 - `DUPLICATE_MODE` validation in `tool-input.ts`
 - Unit tests for `computeContentHash()` and `DuplicateStore`
 - Integration tests for `handleIngestFile` with duplicates

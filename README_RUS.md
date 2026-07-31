@@ -851,12 +851,12 @@ npx mcp-local-rag --duplicate-mode update ingest ./docs/
 - Логика обнаружения дубликатов в конвейере загрузки с поддержкой `DUPLICATE_MODE` (MCP и CLI)
 - CLI-флаг `--duplicate-mode` для подкоманды ingest
 - Класс `DuplicateStore` с методами `add()`, `findByHash()`, `findDuplicates()`, `getAll()`, `remove()`
+- Поле `isDuplicate` в `IngestedFileSummary` для `list_files` — возвращается в ответе инструмента `list_files` и CLI-подкоманде `list`
 
 **В следующей итерации:**
 
 - Инструменты MCP: `list_duplicates`, `cleanup_duplicates`
 - Подкоманды CLI: `duplicates list`, `duplicates cleanup`
-- Поле `isDuplicate` в `IngestedFileSummary` для `list_files`
 - Валидация `DUPLICATE_MODE` в `tool-input.ts`
 - Unit-тесты для `computeContentHash()` и `DuplicateStore`
 - Integration-тесты для `handleIngestFile` с дубликатами

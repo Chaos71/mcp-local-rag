@@ -423,7 +423,9 @@ export interface IVectordb {
    * For PostgreSQL: query the dedicated `files` table (no aggregation over chunks).
    * For LanceDB: aggregate from chunk rows in memory.
    */
-  listFiles(): Promise<{ filePath: string; chunkCount: number; timestamp: string }[]>
+  listFiles(): Promise<
+    { filePath: string; chunkCount: number; timestamp: string; isDuplicate?: boolean }[]
+  >
 
   /**
    * Get system status information.

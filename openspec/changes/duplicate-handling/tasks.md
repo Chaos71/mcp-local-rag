@@ -18,7 +18,7 @@
 - [x] 3.2 Добавить логику проверки дубликатов: skip / update / track
 - [x] 3.3 Обновить `IngestResult` — добавить поля `status: 'new' | 'skipped' | 'updated' | 'tracked'`, `duplicateOf?: string`
 - [x] 3.4 Аналогичная интеграция в CLI `ingestSingleFile`
-- [ ] 3.5 Добавить поле `isDuplicate` в `IngestedFileSummary` для `list_files`
+- [x] 3.5 Добавить поле `isDuplicate` в `IngestedFileSummary` для `list_files`
 
 ## 4. Новые инструменты MCP
 
