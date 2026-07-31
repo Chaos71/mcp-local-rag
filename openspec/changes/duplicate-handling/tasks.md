@@ -23,16 +23,16 @@
 ## 4 CLI-подкоманды
 
 - [x] 4.1 Создать `src/cli/duplicates.ts` — CLI-подкоманды `duplicates list`, `duplicates cleanup`
-- [ ] 4.2 Добавить парсинг аргументов: `--include-deprecated`, `--dry-run`
-- [ ] 4.3 Вывести результат в формате JSON или human-readable
-- [ ] 4.4 Добавить `--help` текст
+- [x] 4.2 Добавить парсинг аргументов: `--include-deprecated`, `--dry-run`
+- [x] 4.3 Вывести результат в формате JSON или human-readable
+- [x] 4.4 Добавить `--help` текст
 
 ## 5. Конфигурация
 
-- [ ] 5.1 Добавить переменную окружения `DUPLICATE_MODE` (значения: `skip`, `update`, `track`)
-- [ ] 5.2 Добавить валидацию значения в `tool-input.ts`
-- [ ] 5.3 Обновить `.env.example` — добавить `DUPLICATE_MODE=skip`
-- [ ] 5.4 Обновить `QWEN.md` — документация по режимам дубликатов
+- [x] 5.1 Добавить переменную окружения `DUPLICATE_MODE` (значения: `skip`, `update`, `track`)
+- [x] 5.2 Добавить валидацию значения в `tool-input.ts`
+- [x] 5.3 Обновить `.env.example` — добавить `DUPLICATE_MODE=skip`
+- [x] 5.4 Обновить `QWEN.md` — документация по режимам дубликатов
 
 ## 6. Тестирование
 

@@ -326,11 +326,39 @@ npx mcp-local-rag duplicates cleanup
 **В следующей итерации:**
 
 - Инструменты MCP: `list_duplicates`, `cleanup_duplicates`
-- Валидация `DUPLICATE_MODE` в `tool-input.ts`
 - Unit-тесты для `computeContentHash()` и `DuplicateStore`
 - Integration-тесты для `handleIngestFile` с дубликатами
 - Обновление `openspec/specs/mcp-local-rag/spec.md` — добавление требований к дубликатам
 - Добавление примеров использования CLI-команд в документацию
+
+### Режимы дубликатов
+
+Переменная окружения `DUPLICATE_MODE` определяет поведение при повторной загрузке файла с тем же содержимым:
+
+| Режим | Поведение |
+|-------|-----------|
+| `skip` (по умолчанию) | Пропустить загрузку, если файл уже существует в индексе |
+| `update` | Обновить существующую запись, удалив старую и создав новую |
+| `track` | Сохранить обе версии с меткой статуса (`active` / `deprecated`) |
+
+**Валидация:** При запуске MCP-сервера невалидное значение (`invalid`, `SKIP`, `update-old`) вызывает ошибку `McpError(InvalidParams)` с сообщением вида:
+```
+Invalid DUPLICATE_MODE "INVALID". Expected "skip", "update", or "track".
+```
+
+**Настройка:**
+```bash
+# Использовать режим отслеживания (сохранять все версии)
+export DUPLICATE_MODE=track
+
+# Обновлять существующие записи вместо пропуска
+export DUPLICATE_MODE=update
+```
+
+**CLI-флаг:** Подкоманда `ingest` поддерживает флаг `--duplicate-mode`:
+```bash
+npx mcp-local-rag ingest --duplicate-mode track ./docs/
+```
 
 **Поле `isDuplicate` в `IngestedFileSummary`:**
 

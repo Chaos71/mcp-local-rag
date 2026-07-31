@@ -9,6 +9,7 @@
 // leaking internal diagnostics to the client.
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
+import { DEFAULT_DUPLICATE_MODE, type DuplicateMode } from '../duplicates/types.js'
 import type { ContentFormat } from '../utils/raw-data-utils.js'
 import type {
   DeleteFileInput,
@@ -20,6 +21,7 @@ import type {
 } from './types.js'
 
 const CONTENT_FORMATS: readonly ContentFormat[] = ['text', 'html', 'markdown']
+const DUPLICATE_MODES: readonly DuplicateMode[] = ['skip', 'update', 'track']
 
 const SCOPE_ERROR = 'scope must be a non-empty string or a non-empty array of non-empty strings'
 
@@ -41,6 +43,32 @@ function normalizeScope(scope: unknown): string[] {
   }
 
   throw new McpError(ErrorCode.InvalidParams, SCOPE_ERROR)
+}
+
+/**
+ * Validate the `DUPLICATE_MODE` environment variable.
+ *
+ * Returns the validated mode or the default when the variable is absent.
+ * Throws `McpError(InvalidParams)` when the value is set but invalid.
+ *
+ * This function is called during server initialization (via `RAGServerConfig`)
+ * to catch misconfiguration early — before any ingest attempt — and surface
+ * a clean structured error instead of letting an unknown mode reach the
+ * duplicate-handling pipeline.
+ */
+export function validateDuplicateMode(): DuplicateMode {
+  const raw = process.env['DUPLICATE_MODE']
+  if (raw === undefined || raw === '') {
+    return DEFAULT_DUPLICATE_MODE
+  }
+  const mode = raw.trim() as DuplicateMode
+  if (!DUPLICATE_MODES.includes(mode)) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Invalid DUPLICATE_MODE "${raw}". Expected "skip", "update", or "track".`
+    )
+  }
+  return mode
 }
 
 function asRecord(raw: unknown, label: string): Record<string, unknown> {

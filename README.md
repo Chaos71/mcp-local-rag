@@ -792,11 +792,11 @@ Hash: f6e5d4c3b2a1...
 - CLI `--duplicate-mode` flag for ingest subcommand
 - `DuplicateStore` class with `add()`, `findByHash()`, `findDuplicates()`, `getAll()`, `remove()` methods
 - `isDuplicate` field in `IngestedFileSummary` for `list_files` — returned in `list_files` tool response and CLI `list` output
+- `DUPLICATE_MODE` validation in `tool-input.ts` — rejects invalid values at startup with `McpError(InvalidParams)`
 
 **Pending (next iteration):**
 
 - MCP tools: `list_duplicates`, `cleanup_duplicates`
-- `DUPLICATE_MODE` validation in `tool-input.ts`
 - Unit tests for `computeContentHash()` and `DuplicateStore`
 - Integration tests for `handleIngestFile` with duplicates
 

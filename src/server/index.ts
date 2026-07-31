@@ -13,7 +13,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { DEFAULT_MIN_CHUNK_LENGTH, SemanticChunker } from '../chunker/index.js'
 import { computeContentHash } from '../duplicates/hash.js'
-import { DEFAULT_DUPLICATE_MODE, type DuplicateMode } from '../duplicates/types.js'
+import type { DuplicateMode } from '../duplicates/types.js'
 import { createEmbedder } from '../embedder/factory.js'
 import type { Embedder, IEmbedder } from '../embedder/index.js'
 import type { EmbeddingBackend, LlamaCppConfig } from '../embedder/types.js'
@@ -57,6 +57,7 @@ import {
   parseListFilesInput,
   parseQueryDocumentsInput,
   parseReadChunkNeighborsInput,
+  validateDuplicateMode,
 } from './tool-input.js'
 import type {
   DeleteFileResult,
@@ -140,8 +141,8 @@ export class RAGServer {
 
   constructor(config: RAGServerConfig) {
     this.dbPath = config.dbPath
-    // Duplicate mode: read from environment variable, fall back to default
-    this.duplicateMode = (process.env['DUPLICATE_MODE'] as DuplicateMode) ?? DEFAULT_DUPLICATE_MODE
+    // Duplicate mode: validate from environment variable, fall back to default
+    this.duplicateMode = validateDuplicateMode()
     // Normalize both config shapes into a single `baseDirs: string[]` plus the
     // legacy single-root accessor. See `normalizeBaseDirs` for the degraded-
     // mode and misuse semantics.
