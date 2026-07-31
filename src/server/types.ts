@@ -209,6 +209,8 @@ export interface IngestResult {
   timestamp: string
   /** Document title extracted from file content (display-only, not used for scoring) */
   fileTitle: string | null
+  /** SHA-256 hash of the file content (null if computation failed or file too large) */
+  contentHash: string | null
   /** Status indicating how the ingest handled duplicates: 'new' (first upload), 'skipped' (exact duplicate, skipped), 'updated' (changed content, replaced previous version), 'tracked' (different version, both kept) */
   status: 'new' | 'skipped' | 'updated' | 'tracked'
   /** File path of the original document this is a duplicate of (only set when status is 'skipped', 'updated', or 'tracked') */

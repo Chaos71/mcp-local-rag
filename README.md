@@ -695,13 +695,18 @@ mcp-local-rag tracks document duplicates using SHA-256 content hashing. When the
 - **LanceDB:** Added `status` column (active/deprecated) and `contentHash` column to chunks table; creates `duplicates` table on first insertion.
 - **PostgreSQL:** Added `status` column to `chunks` table; creates `duplicates` table during `initialize()`.
 
+**Implemented (Section 3.1):**
+
+- SHA-256 content hash computation in `handleIngestFile` via `computeContentHash()`
+- `IngestResult.contentHash` field: SHA-256 hex digest (64 characters) or `null` if computation failed
+
 **Future Features (in progress):**
 
 - MCP tools: `list_duplicates`, `cleanup_duplicates`
 - CLI subcommands: `duplicates list`, `duplicates cleanup`
 - `IngestResult.status` field: `'new' | 'skipped' | 'updated' | 'tracked'`
 
-> **Note:** Duplicate handling integration in the ingest pipeline (Section 3) is currently in progress. The schema and tracking infrastructure are ready.
+> **Note:** Duplicate handling integration in the ingest pipeline (Section 3) is partially complete. Hash computation (3.1) is implemented; duplicate detection logic (3.2) is pending.
 
 ### Document Roots (`BASE_DIR` and `BASE_DIRS`)
 

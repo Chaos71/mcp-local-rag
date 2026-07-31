@@ -12,6 +12,7 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js'
 import { DEFAULT_MIN_CHUNK_LENGTH, SemanticChunker } from '../chunker/index.js'
+import { computeContentHash } from '../duplicates/hash.js'
 import { createEmbedder } from '../embedder/factory.js'
 import type { Embedder, IEmbedder } from '../embedder/index.js'
 import type { EmbeddingBackend, LlamaCppConfig } from '../embedder/types.js'
@@ -410,6 +411,15 @@ export class RAGServer {
     // For raw-data files (from ingest_data), read directly without validation
     // since the path is internally generated and content is already processed
     const isPdf = args.filePath.toLowerCase().endsWith('.pdf')
+    // 3.1: Вычисление хеша содержимого файла для обнаружения дубликатов
+    let contentHash: string | null = null
+    try {
+      contentHash = await computeContentHash(args.filePath)
+      console.error(`Content hash computed: ${contentHash}`)
+    } catch (hashError) {
+      console.error(`Failed to compute content hash: ${hashError}`)
+      // Continue without hash — duplicate detection will be skipped
+    }
     let text: string
     let title: string | null = null
     let chunks: Awaited<ReturnType<typeof buildChunksAndEmbeddings>>['chunks']
@@ -539,6 +549,8 @@ export class RAGServer {
       chunkCount: chunks.length,
       timestamp: new Date().toISOString(),
       fileTitle: title || null,
+      contentHash,
+      status: 'new', // 3.1: по умолчанию 'new'; 3.2 обновит при обнаружении дубликата
     }
 
     return {
