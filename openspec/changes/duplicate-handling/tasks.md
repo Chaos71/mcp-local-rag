@@ -37,7 +37,7 @@
 ## 6. Тестирование
 
 - [x] 6.1 Unit-тесты для `computeContentHash()` — проверка корректности SHA-256
-- [ ] 6.2 Unit-тесты для `DuplicateStore` — add, findByHash, findDuplicates
+- [x] 6.2 Unit-тесты для `DuplicateStore` — add, findByHash, findDuplicates
 - [ ] 6.3 Integration-тесты для `handleIngestFile` с дубликатами
 - [ ] 6.4 Integration-тесты для CLI-подкоманд `duplicates list` и `duplicates cleanup`
 

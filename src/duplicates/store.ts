@@ -34,7 +34,7 @@ export class DuplicateStore {
       // Mark existing as deprecated/duplicate
       existing.status = 'deprecated'
       // New entry references the old one
-      return {
+      const newEntry: DuplicateEntry = {
         id,
         contentHash: entry.contentHash,
         filePath: entry.filePath,
@@ -43,10 +43,12 @@ export class DuplicateStore {
         createdAt: timestamp,
         fileSize: entry.fileSize,
       }
+      this.entries.set(id, newEntry)
+      return newEntry
     }
 
     // First occurrence — original
-    return {
+    const newEntry: DuplicateEntry = {
       id,
       contentHash: entry.contentHash,
       filePath: entry.filePath,
@@ -55,6 +57,8 @@ export class DuplicateStore {
       createdAt: timestamp,
       fileSize: entry.fileSize,
     }
+    this.entries.set(id, newEntry)
+    return newEntry
   }
 
   /**
