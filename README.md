@@ -788,17 +788,21 @@ Hash: f6e5d4c3b2a1...
 - SHA-256 content hash computation in `handleIngestFile` (MCP server) and `ingestSingleFile` (CLI) via `computeContentHash()`
 - `IngestResult.contentHash` field: SHA-256 hex digest (64 characters) or `null` if computation failed
 - `IngestResult.status` field: `'new' | 'skipped' | 'updated' | 'tracked'`
+- `DUPLICATE_MODE` validation in `tool-input.ts` with error on invalid values
+- `DuplicateStore` class with methods `add()`, `findByHash()`, `findDuplicates()`, `getAll()`, `remove()`
+- `isDuplicate` field in `IngestedFileSummary` for `list_files` — returned in MCP `list_files` response and CLI `list` command
+- CLI subcommands `duplicates list` and `duplicates cleanup` with full argument parsing
+- Unit tests for `computeContentHash()` and `DuplicateStore`
+- Integration tests for CLI `duplicates list` and `duplicates cleanup` commands
 - Duplicate detection logic in ingest pipeline with `DUPLICATE_MODE` support (both MCP and CLI)
 - CLI `--duplicate-mode` flag for ingest subcommand
-- `DuplicateStore` class with `add()`, `findByHash()`, `findDuplicates()`, `getAll()`, `remove()` methods
-- `isDuplicate` field in `IngestedFileSummary` for `list_files` — returned in `list_files` tool response and CLI `list` output
 - `DUPLICATE_MODE` validation in `tool-input.ts` — rejects invalid values at startup with `McpError(InvalidParams)`
 
 **Pending (next iteration):**
 
 - MCP tools: `list_duplicates`, `cleanup_duplicates`
-- Unit tests for `computeContentHash()` and `DuplicateStore`
 - Integration tests for `handleIngestFile` with duplicates
+- Update `openspec/specs/mcp-local-rag/spec.md` — add duplicate handling requirements
 
 ### Document Roots (`BASE_DIR` and `BASE_DIRS`)
 

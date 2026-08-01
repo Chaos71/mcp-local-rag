@@ -904,17 +904,20 @@ npx mcp-local-rag duplicates cleanup
 - Вычисление хеша содержимого SHA-256 в `handleIngestFile` (MCP-сервер) и `ingestSingleFile` (CLI) через `computeContentHash()`
 - Поле `IngestResult.contentHash`: SHA-256 hex digest (64 символа) или `null` при ошибке вычисления
 - Поле `IngestResult.status`: `'new' | 'skipped' | 'updated' | 'tracked'`
-- Логика обнаружения дубликатов в конвейере загрузки с поддержкой `DUPLICATE_MODE` (MCP и CLI)
-- CLI-флаг `--duplicate-mode` для подкоманды ingest
+- Валидация `DUPLICATE_MODE` в `tool-input.ts` — отклоняет невалидные значения при запуске через `McpError(InvalidParams)`
 - Класс `DuplicateStore` с методами `add()`, `findByHash()`, `findDuplicates()`, `getAll()`, `remove()`
 - Поле `isDuplicate` в `IngestedFileSummary` для `list_files` — возвращается в ответе инструмента `list_files` и CLI-подкоманде `list`
+- CLI-подкоманды `duplicates list` и `duplicates cleanup` с полным парсингом аргументов
+- Unit-тесты для `computeContentHash()` и `DuplicateStore`
+- Integration-тесты для CLI-подкоманд `duplicates list` и `duplicates cleanup`
+- Логика обнаружения дубликатов в конвейере загрузки с поддержкой `DUPLICATE_MODE` (MCP и CLI)
+- CLI-флаг `--duplicate-mode` для подкоманды ingest
 
 **В следующей итерации:**
 
 - Инструменты MCP: `list_duplicates`, `cleanup_duplicates`
-- Валидация `DUPLICATE_MODE` в `tool-input.ts`
-- Unit-тесты для `computeContentHash()` и `DuplicateStore`
 - Integration-тесты для `handleIngestFile` с дубликатами
+- Обновление `openspec/specs/mcp-local-rag/spec.md` — добавление требований к дубликатам
 
 ### Корневые директории документов (`BASE_DIR` и `BASE_DIRS`)
 
