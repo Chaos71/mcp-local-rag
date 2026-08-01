@@ -497,7 +497,7 @@ export class VectorStore implements IVectordb {
    * @returns Array of file information
    */
   async listFiles(): Promise<
-    { filePath: string; chunkCount: number; timestamp: string; isDuplicate?: boolean }[]
+    { filePath: string; chunkCount: number; timestamp: string; isDuplicate: boolean }[]
   > {
     if (!this.table) {
       return [] // Return empty array if table doesn't exist
@@ -544,7 +544,10 @@ export class VectorStore implements IVectordb {
         if (group.filePaths.length > 1) {
           // Mark all but the first (original) as duplicates
           for (let i = 1; i < group.filePaths.length; i++) {
-            duplicateFilePaths.add(group.filePaths[i])
+            const filePath = group.filePaths[i]
+            if (filePath) {
+              duplicateFilePaths.add(filePath)
+            }
           }
         }
         // Also mark deprecated files as duplicates

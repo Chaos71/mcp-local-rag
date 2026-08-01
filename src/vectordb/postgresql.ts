@@ -864,7 +864,7 @@ export class PostgreSQLVectordb implements IVectordb {
    * Also checks the duplicates table to mark duplicate files.
    */
   async listFiles(): Promise<
-    { filePath: string; chunkCount: number; timestamp: string; isDuplicate?: boolean }[]
+    { filePath: string; chunkCount: number; timestamp: string; isDuplicate: boolean }[]
   > {
     if (!this.pool || !this.initialized) {
       return []

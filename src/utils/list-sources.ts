@@ -17,7 +17,7 @@ import { matchesAnyScope } from './scope-match.js'
  * caller's richer row type is consumed structurally.
  */
 export interface KeyedIngestedEntry {
-  entry: { filePath: string; chunkCount: number; timestamp: string; isDuplicate?: boolean }
+  entry: { filePath: string; chunkCount: number; timestamp: string; isDuplicate: boolean }
   key: string
 }
 
@@ -27,8 +27,8 @@ export interface KeyedIngestedEntry {
  * the `SourceEntry` union both surfaces already return (no type-move refactor).
  */
 export type ClassifiedSource =
-  | { source: string; chunkCount: number; timestamp: string; isDuplicate?: boolean }
-  | { filePath: string; chunkCount: number; timestamp: string; isDuplicate?: boolean }
+  | { source: string; chunkCount: number; timestamp: string; isDuplicate: boolean }
+  | { filePath: string; chunkCount: number; timestamp: string; isDuplicate: boolean }
 
 /**
  * Classify the ingested entries that matched no scanned file into `sources`.

@@ -424,7 +424,7 @@ export interface IVectordb {
    * For LanceDB: aggregate from chunk rows in memory.
    */
   listFiles(): Promise<
-    { filePath: string; chunkCount: number; timestamp: string; isDuplicate?: boolean }[]
+    { filePath: string; chunkCount: number; timestamp: string; isDuplicate: boolean }[]
   >
 
   /**
