@@ -88,6 +88,8 @@ export interface VectorChunk {
   timestamp: string
   /** Chunk status — 'active' or 'deprecated' (default: 'active') */
   status?: ChunkStatus
+  /** SHA-256 hash of file content for duplicate detection (nullable — may be absent in legacy data) */
+  contentHash?: string | null
 }
 
 /**
@@ -207,7 +209,8 @@ export function toVectorChunk(raw: unknown): VectorChunk {
     throw new DatabaseError('Invalid chunk row shape from LanceDB')
   }
   const obj = raw as Record<string, unknown>
-  const { id, filePath, chunkIndex, text, vector, metadata, fileTitle, timestamp } = obj
+  const { id, filePath, chunkIndex, text, vector, metadata, fileTitle, timestamp, contentHash } =
+    obj
   if (
     typeof id !== 'string' ||
     typeof filePath !== 'string' ||
@@ -232,6 +235,7 @@ export function toVectorChunk(raw: unknown): VectorChunk {
     metadata,
     fileTitle: typeof fileTitle === 'string' && fileTitle.length > 0 ? fileTitle : null,
     timestamp,
+    contentHash: typeof contentHash === 'string' ? contentHash : null,
   }
 }
 

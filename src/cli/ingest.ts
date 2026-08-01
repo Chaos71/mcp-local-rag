@@ -438,6 +438,7 @@ export async function ingestSingleFile(
       embeddings,
       fileSize: visualResult.text.length,
       fileTitle: title,
+      contentHash,
     })
     await vectorStore.insertChunks(vectorChunks)
     console.error(
@@ -483,6 +484,7 @@ export async function ingestSingleFile(
     embeddings,
     fileSize: text.length,
     fileTitle: title,
+    contentHash,
   })
 
   // Insert chunks

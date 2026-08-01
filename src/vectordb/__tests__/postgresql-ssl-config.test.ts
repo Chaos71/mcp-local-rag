@@ -7,7 +7,7 @@
 //
 // Fix: Use ssl: false (boolean) instead of ssl: 'disable' (string) when SSL should be disabled.
 
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 // ============================================
 // Mock Setup (vi.hoisted for isolate: false)

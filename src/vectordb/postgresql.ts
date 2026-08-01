@@ -5,6 +5,7 @@ import { normalizeScopePrefix } from '../utils/scope-match.js'
 import { applyFileFilter, applyGrouping, applyKeywordBoost } from './search-filters.js'
 import {
   type ChunkRow,
+  type ChunkStatus,
   DatabaseError,
   DEFAULT_HYBRID_WEIGHT,
   DEFAULT_PG_SCHEMA,
@@ -37,7 +38,7 @@ types.setTypeParser(114, (value: string) => value) // json → string
 types.setTypeParser(1700, (value: string): number[] => {
   // Parse halfvec string format: '[0.1,0.2,...]'
   const match = value.match(/^\[(.+)\]$/)
-  if (!match || !match[1]) return []
+  if (!match?.[1]) return []
   return match[1].split(',').map(Number)
 })
 
@@ -516,13 +517,26 @@ export class PostgreSQLVectordb implements IVectordb {
 
       // Prepare UPSERT statement
       const insertSQL = `
-        INSERT INTO ${qualified(this.tableName, this.schema)} (id, file_path, chunk_index, text, embedding, file_title, timestamp)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO ${qualified(this.tableName, this.schema)} (
+          id, file_path, chunk_index, text, embedding, file_title, timestamp,
+          status, contentHash
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         ON CONFLICT (id) DO UPDATE SET
           text = EXCLUDED.text,
           embedding = EXCLUDED.embedding,
           file_title = EXCLUDED.file_title,
-          timestamp = EXCLUDED.timestamp
+          timestamp = EXCLUDED.timestamp,
+          status = EXCLUDED.status,
+          contentHash = EXCLUDED.contentHash
+      `
+
+      // Prepare duplicates UPSERT statement
+      const duplicatesSQL = `
+        INSERT INTO ${qualified('duplicates', this.schema)} (content_hash, file_path, status)
+        VALUES ($1, $2, 'active')
+        ON CONFLICT (content_hash, file_path) DO UPDATE SET
+          status = 'active'
       `
 
       // Prepare files table update
@@ -549,7 +563,14 @@ export class PostgreSQLVectordb implements IVectordb {
           embeddingStr,
           chunk.fileTitle,
           chunk.timestamp,
+          'active',
+          chunk.contentHash,
         ])
+
+        // Запись в duplicates таблицу (только если contentHash вычислен)
+        if (chunk.contentHash) {
+          await client.query(duplicatesSQL, [chunk.contentHash, chunk.filePath])
+        }
       }
 
       // Update files table with aggregated counts
@@ -637,7 +658,7 @@ export class PostgreSQLVectordb implements IVectordb {
 
     try {
       const result = await this.pool.query(
-        `SELECT id, file_path, chunk_index, text, embedding, file_title, timestamp FROM ${qualified(this.tableName, this.schema)} WHERE file_path = $1 ORDER BY chunk_index`,
+        `SELECT id, file_path, chunk_index, text, embedding, file_title, timestamp, status, contentHash FROM ${qualified(this.tableName, this.schema)} WHERE file_path = $1 ORDER BY chunk_index`,
         [filePath]
       )
 
@@ -973,12 +994,12 @@ export class PostgreSQLVectordb implements IVectordb {
     try {
       // Rebuild IVFFlat index
       await this.pool.query(
-        `REINDEX INDEX ${qualified(this.tableName + '_embedding_idx', this.schema)}`
+        `REINDEX INDEX ${qualified(`${this.tableName}_embedding_idx`, this.schema)}`
       )
 
       // Rebuild pg_trgm index
       await this.pool.query(
-        `REINDEX INDEX ${qualified(this.tableName + '_text_trgm_idx', this.schema)}`
+        `REINDEX INDEX ${qualified(`${this.tableName}_text_trgm_idx`, this.schema)}`
       )
 
       // Vacuum tables to reclaim space
@@ -1205,7 +1226,12 @@ export class PostgreSQLVectordb implements IVectordb {
       fileTitle:
         typeof row.file_title === 'string' && row.file_title.length > 0 ? row.file_title : null,
       timestamp: row.timestamp,
-    }
+      status:
+        row.status === 'active' || row.status === 'deprecated'
+          ? (row.status as ChunkStatus)
+          : undefined,
+      contentHash: row.contentHash ?? undefined,
+    } as VectorChunk
   }
 
   private rowToChunkRow(row: PgChunksRow): ChunkRow {

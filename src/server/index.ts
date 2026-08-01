@@ -516,6 +516,7 @@ export class RAGServer {
       embeddings,
       fileSize: text.length,
       fileTitle: title || null,
+      contentHash,
     })
 
     // Insert vectors (transaction processing)

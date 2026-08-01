@@ -84,6 +84,8 @@ export async function buildChunksAndEmbeddings(
  * @param fileSize Length value recorded in `metadata.fileSize`. The caller
  *   chooses the source: the default path passes parsed text length; the visual
  *   path passes the joined enriched-page text length (pre-chunking).
+ * @param contentHash SHA-256 hash of the file content for duplicate detection.
+ *   May be `null` when the caller hasn't computed it yet.
  */
 export function buildVectorChunks(params: {
   filePath: string
@@ -91,8 +93,9 @@ export function buildVectorChunks(params: {
   embeddings: number[][]
   fileSize: number
   fileTitle: string | null
+  contentHash?: string | null
 }): VectorChunk[] {
-  const { filePath, chunks, embeddings, fileSize, fileTitle } = params
+  const { filePath, chunks, embeddings, fileSize, fileTitle, contentHash } = params
   const timestamp = new Date().toISOString()
   return chunks.map((chunk, index) => {
     const embedding = embeddings[index]
@@ -112,6 +115,7 @@ export function buildVectorChunks(params: {
       },
       fileTitle,
       timestamp,
+      contentHash: contentHash ?? null,
     }
   })
 }

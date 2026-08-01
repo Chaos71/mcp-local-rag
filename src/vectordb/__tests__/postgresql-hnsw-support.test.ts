@@ -1,8 +1,7 @@
 // Тесты для поддержки HNSW индекса PostgreSQL для размерностей > 2000
 
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { buildSchemaSQL, PostgreSQLVectordb } from '../postgresql.js'
-import { DatabaseError } from '../types.js'
 
 describe('PostgreSQLVectordb — HNSW индекс для размерностей > 2000', () => {
   describe('buildSchemaSQL', () => {

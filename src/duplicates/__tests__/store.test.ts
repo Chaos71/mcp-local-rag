@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import { DuplicateStore } from '../store.js'
-import type { DuplicateEntry, DuplicateMode } from '../types.js'
+import type { DuplicateEntry } from '../types.js'
 
 // Helpers
 function createEntry(
@@ -18,7 +18,7 @@ function createEntry(
   }
 }
 
-function withTimestamp(entry: DuplicateEntry, timestamp: string): DuplicateEntry {
+function _withTimestamp(entry: DuplicateEntry, timestamp: string): DuplicateEntry {
   return { ...entry, createdAt: timestamp }
 }
 
@@ -99,7 +99,7 @@ describe('DuplicateStore', () => {
       const original = store.add(createEntry({ contentHash: 'hash-1', filePath: '/a.txt' }))
       // Small delay to ensure different timestamps
       await new Promise((resolve) => setTimeout(resolve, 2))
-      const latest = store.add(createEntry({ contentHash: 'hash-1', filePath: '/b.txt' }))
+      const _latest = store.add(createEntry({ contentHash: 'hash-1', filePath: '/b.txt' }))
 
       const found = store.findByHash('hash-1')
       // findByHash returns the most recent entry (the duplicate, since original is deprecated)
@@ -145,8 +145,8 @@ describe('DuplicateStore', () => {
     })
 
     it('should return entries sorted by creation time (oldest first)', () => {
-      const original = store.add(createEntry({ contentHash: 'hash-1', filePath: '/a.txt' }))
-      const dup1 = store.add(createEntry({ contentHash: 'hash-1', filePath: '/b.txt' }))
+      const _original = store.add(createEntry({ contentHash: 'hash-1', filePath: '/a.txt' }))
+      const _dup1 = store.add(createEntry({ contentHash: 'hash-1', filePath: '/b.txt' }))
 
       const duplicates = store.findDuplicates('hash-1')
       expect(duplicates).toHaveLength(2)
@@ -222,8 +222,8 @@ describe('DuplicateStore', () => {
 
   describe('markDeprecated()', () => {
     it('should mark all non-deprecated entries with the given hash', () => {
-      const original = store.add(createEntry({ contentHash: 'hash-1', filePath: '/a.txt' }))
-      const dup = store.add(createEntry({ contentHash: 'hash-1', filePath: '/b.txt' }))
+      const _original = store.add(createEntry({ contentHash: 'hash-1', filePath: '/a.txt' }))
+      const _dup = store.add(createEntry({ contentHash: 'hash-1', filePath: '/b.txt' }))
 
       // original is already 'deprecated' from add(dup), only dup is 'duplicate'
       const count = store.markDeprecated('hash-1')
@@ -239,7 +239,7 @@ describe('DuplicateStore', () => {
     })
 
     it('should not re-mark already deprecated entries', () => {
-      const original = store.add(createEntry({ contentHash: 'hash-1', filePath: '/a.txt' }))
+      const _original = store.add(createEntry({ contentHash: 'hash-1', filePath: '/a.txt' }))
       store.add(createEntry({ contentHash: 'hash-1', filePath: '/b.txt' }))
 
       // First call marks the duplicate as deprecated (original is already deprecated)

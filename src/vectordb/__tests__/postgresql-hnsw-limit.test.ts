@@ -4,7 +4,7 @@
  */
 
 import { Pool } from 'pg'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { PostgreSQLVectordb } from '../postgresql.js'
 import type { PostgreSQLVectorStoreConfig } from '../types.js'
 

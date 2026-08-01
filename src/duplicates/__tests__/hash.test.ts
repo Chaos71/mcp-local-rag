@@ -20,7 +20,7 @@ const knownHashes: Record<string, string> = {
 let tempDir: string
 
 beforeEach(async () => {
-  tempDir = join(tmpdir(), 'mcp-local-rag-hash-test-' + Date.now())
+  tempDir = join(tmpdir(), `mcp-local-rag-hash-test-${Date.now()}`)
   await mkdir(tempDir, { recursive: true })
 })
 

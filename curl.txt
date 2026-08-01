@@ -1,0 +1,1 @@
+curl http://192.168.88.207:6789/v1/embeddings -H "Content-Type: application/json" -d '{ "model": "Qwen3-VL-Embedding-2B", "input": "Это текст, для которого нужно получить embedding"}'
