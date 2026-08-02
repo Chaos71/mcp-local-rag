@@ -612,6 +612,8 @@ export class PostgreSQLVectordb implements IVectordb {
   /**
    * Delete all chunks for a specified file path.
    * Also updates the files table to remove the entry.
+   * Очищает записи в duplicates table, чтобы не оставалось
+   * устаревших хешей при повторной загрузке файла.
    */
   async deleteChunks(filePath: string): Promise<number> {
     if (!this.pool || !this.initialized) {
@@ -637,6 +639,12 @@ export class PostgreSQLVectordb implements IVectordb {
       await client.query(`DELETE FROM ${qualified('metadata', this.schema)} WHERE file_path = $1`, [
         filePath,
       ])
+
+      // Delete from duplicates table (очистка устаревших записей)
+      await client.query(
+        `DELETE FROM ${qualified('duplicates', this.schema)} WHERE file_path = $1`,
+        [filePath]
+      )
 
       console.error(`PostgreSQLVectordb: Deleted ${deletedCount} chunks for file "${filePath}"`)
       return deletedCount

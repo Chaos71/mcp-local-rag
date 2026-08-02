@@ -399,6 +399,58 @@ export async function ingestSingleFile(
     // Continue without hash — duplicate detection will be skipped
   }
 
+  // 3.1-b: Ранняя проверка дубликатов (до любых изменений в БД)
+  // Если дубликат найден и режим skip — возвращаемся без изменений.
+  // Для update помечаем оригинал deprecated до перезаписи текущего файла.
+  let resultStatus: 'new' | 'skipped' | 'updated' | 'tracked' = 'new'
+  let duplicateOf: string | undefined
+
+  if (contentHash) {
+    try {
+      const duplicates = await vectorStore.getDuplicatesByHash(contentHash, true)
+
+      if (duplicates.length > 0) {
+        const duplicateGroup = duplicates[0]
+        if (duplicateGroup) {
+          const originalFilePath =
+            duplicateGroup.filePaths.find((p) => p !== filePath) ?? duplicateGroup.filePaths[0]
+
+          if (originalFilePath) {
+            duplicateOf = originalFilePath
+
+            switch (duplicateMode) {
+              case 'skip': {
+                resultStatus = 'skipped'
+                console.error(
+                  `Ingest skipped (duplicate): ${filePath} (mode: skip, original: ${originalFilePath})`
+                )
+                return { chunkCount: 0, status: 'skipped', duplicateOf: originalFilePath }
+              }
+
+              case 'update': {
+                if (originalFilePath !== filePath) {
+                  await vectorStore.markDeprecated(originalFilePath)
+                }
+                resultStatus = 'updated'
+                break
+              }
+
+              case 'track': {
+                resultStatus = 'tracked'
+                console.error(
+                  `Ingest tracked (duplicate): ${filePath} (mode: track, original: ${originalFilePath})`
+                )
+                break
+              }
+            }
+          }
+        }
+      }
+    } catch (duplicateCheckError) {
+      console.error(`Failed to check duplicates: ${duplicateCheckError}`)
+    }
+  }
+
   // Parse file
   const isPdf = filePath.toLowerCase().endsWith('.pdf')
   let text: string
@@ -445,14 +497,12 @@ export async function ingestSingleFile(
       `  [visual chunk+embed] ${(performance.now() - tVisual).toFixed(1)}ms (${vectorChunks.length} chunks)`
     )
 
-    // 3.2: Duplicate handling for visual path
-    return ingestSingleFileResult(
-      vectorStore,
-      contentHash,
-      duplicateMode,
-      filePath,
-      vectorChunks.length
-    )
+    // 3.2: Duplicate handling — результат уже определён на ранней проверке
+    return {
+      chunkCount: vectorChunks.length,
+      status: resultStatus,
+      ...(duplicateOf ? { duplicateOf } : {}),
+    }
   } else if (isPdf) {
     const result = await parser.parsePdf(filePath, embedder)
     text = result.content
@@ -490,92 +540,9 @@ export async function ingestSingleFile(
   // Insert chunks
   await vectorStore.insertChunks(vectorChunks)
 
-  // 3.2: Логика проверки дубликатов
-  return ingestSingleFileResult(
-    vectorStore,
-    contentHash,
-    duplicateMode,
-    filePath,
-    vectorChunks.length
-  )
-}
-
-/**
- * Helper: apply duplicate handling logic and return the result.
- *
- * Checks for existing duplicates via `vectorStore.getDuplicatesByHash()`,
- * applies the configured `duplicateMode` (skip / update / track), and
- * returns an `IngestSingleFileResult` with the appropriate status.
- */
-async function ingestSingleFileResult(
-  vectorStore: VectorStore | PostgreSQLVectordb,
-  contentHash: string | null,
-  duplicateMode: DuplicateMode,
-  filePath: string,
-  chunkCount: number
-): Promise<IngestSingleFileResult> {
-  let resultStatus: 'new' | 'skipped' | 'updated' | 'tracked' = 'new'
-  let duplicateOf: string | undefined
-
-  if (contentHash) {
-    try {
-      const duplicates = await vectorStore.getDuplicatesByHash(contentHash, true)
-
-      if (duplicates.length > 0) {
-        // Дубликат найден — применяем режим обработки
-        const duplicateGroup = duplicates[0]
-        if (duplicateGroup) {
-          // Берём первый активный файл как оригинал
-          const originalFilePath =
-            duplicateGroup.filePaths.find((p) => p !== filePath) ?? duplicateGroup.filePaths[0]
-
-          if (originalFilePath) {
-            duplicateOf = originalFilePath
-
-            switch (duplicateMode) {
-              case 'skip': {
-                // Пропустить загрузку, вернуть предупреждение
-                resultStatus = 'skipped'
-                console.error(
-                  `Ingest skipped (duplicate): ${filePath} (mode: skip, original: ${originalFilePath})`
-                )
-                break
-              }
-
-              case 'update':
-                // Обновить существующий документ: пометить старые как deprecated
-                await vectorStore.markDeprecated(originalFilePath)
-                resultStatus = 'updated'
-                console.error(
-                  `Ingest updated (duplicate): ${filePath} (mode: update, original: ${originalFilePath})`
-                )
-                break
-
-              case 'track':
-                // Сохранить оба экземпляра с пометкой о дубликате
-                resultStatus = 'tracked'
-                console.error(
-                  `Ingest tracked (duplicate): ${filePath} (mode: track, original: ${originalFilePath})`
-                )
-                break
-
-              default:
-                // Неизвестный режим — treat as 'new'
-                resultStatus = 'new'
-                console.error(`Unknown DUPLICATE_MODE "${duplicateMode}", treating as 'new'`)
-                break
-            }
-          }
-        }
-      }
-    } catch (duplicateCheckError) {
-      // Если метод не поддерживается (старая схема), продолжаем как 'new'
-      console.error(`Failed to check duplicates: ${duplicateCheckError}`)
-    }
-  }
-
+  // 3.2: Duplicate handling — результат уже определён на ранней проверке
   return {
-    chunkCount,
+    chunkCount: vectorChunks.length,
     status: resultStatus,
     ...(duplicateOf ? { duplicateOf } : {}),
   }

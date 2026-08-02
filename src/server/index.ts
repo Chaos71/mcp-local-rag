@@ -426,6 +426,73 @@ export class RAGServer {
       console.error(`Failed to compute content hash: ${hashError}`)
       // Continue without hash — duplicate detection will be skipped
     }
+    // 3.1-b: Ранняя проверка дубликатов (до любых изменений в БД)
+    let resultStatus: 'new' | 'skipped' | 'updated' | 'tracked' = 'new'
+    let duplicateOf: string | undefined
+
+    if (contentHash) {
+      try {
+        const duplicates = await this.vectorStore.getDuplicatesByHash(contentHash, true)
+
+        if (duplicates.length > 0) {
+          const duplicateGroup = duplicates[0]
+          if (duplicateGroup) {
+            const originalFilePath =
+              duplicateGroup.filePaths.find((p) => p !== args.filePath) ??
+              duplicateGroup.filePaths[0]
+
+            if (originalFilePath) {
+              duplicateOf = originalFilePath
+
+              switch (this.duplicateMode) {
+                case 'skip': {
+                  resultStatus = 'skipped'
+                  console.error(
+                    `Ingest skipped (duplicate): ${args.filePath} (mode: skip, original: ${originalFilePath})`
+                  )
+                  const result: IngestResult = {
+                    filePath: args.filePath,
+                    chunkCount: 0,
+                    timestamp: new Date().toISOString(),
+                    fileTitle: null,
+                    contentHash,
+                    status: 'skipped',
+                    ...(duplicateOf ? { duplicateOf } : {}),
+                  }
+                  return {
+                    content: this.withWarnings([
+                      {
+                        type: 'text',
+                        text: JSON.stringify(result, null, 2),
+                      },
+                    ]),
+                  }
+                }
+
+                case 'update': {
+                  if (originalFilePath !== args.filePath) {
+                    await this.vectorStore.markDeprecated(originalFilePath)
+                  }
+                  resultStatus = 'updated'
+                  break
+                }
+
+                case 'track': {
+                  resultStatus = 'tracked'
+                  console.error(
+                    `Ingest tracked (duplicate): ${args.filePath} (mode: track, original: ${originalFilePath})`
+                  )
+                  break
+                }
+              }
+            }
+          }
+        }
+      } catch (duplicateCheckError) {
+        console.error(`Failed to check duplicates: ${duplicateCheckError}`)
+      }
+    }
+
     let text: string
     let title: string | null = null
     let chunks: Awaited<ReturnType<typeof buildChunksAndEmbeddings>>['chunks']
@@ -548,76 +615,6 @@ export class RAGServer {
         }
       }
       throw insertError
-    }
-
-    // 3.2: Логика проверки дубликатов
-    let resultStatus: 'new' | 'skipped' | 'updated' | 'tracked' = 'new'
-    let duplicateOf: string | undefined
-
-    if (contentHash) {
-      try {
-        const duplicates = await this.vectorStore.getDuplicatesByHash(contentHash, true)
-
-        if (duplicates.length > 0) {
-          // Дубликат найден — применяем режим обработки
-          const duplicateGroup = duplicates[0]
-          if (duplicateGroup) {
-            // Берём первый активный файл как оригинал
-            const originalFilePath =
-              duplicateGroup.filePaths.find((p) => p !== args.filePath) ??
-              duplicateGroup.filePaths[0]
-
-            if (originalFilePath) {
-              duplicateOf = originalFilePath
-
-              switch (this.duplicateMode) {
-                case 'skip': {
-                  // Пропустить загрузку, вернуть предупреждение
-                  // Отменяем вставку (rollback)
-                  // Примечание: backup имеет тип never из-за TypeScript control flow analysis
-                  // (backup = null в success path). Используем type assertion.
-                  const bk = backup as unknown as VectorChunk[] | null
-                  if (bk != null && bk.length > 0) {
-                    await this.vectorStore.insertChunks(bk)
-                    await this.vectorStore.optimize()
-                  }
-                  resultStatus = 'skipped'
-                  console.error(
-                    `Ingest skipped (duplicate): ${args.filePath} (mode: skip, original: ${originalFilePath})`
-                  )
-                  break
-                }
-
-                case 'update':
-                  // Обновить существующий документ: пометить старые как deprecated
-                  await this.vectorStore.markDeprecated(originalFilePath)
-                  resultStatus = 'updated'
-                  console.error(
-                    `Ingest updated (duplicate): ${args.filePath} (mode: update, original: ${originalFilePath})`
-                  )
-                  break
-
-                case 'track':
-                  // Сохранить оба экземпляра с пометкой о дубликате
-                  resultStatus = 'tracked'
-                  console.error(
-                    `Ingest tracked (duplicate): ${args.filePath} (mode: track, original: ${originalFilePath})`
-                  )
-                  break
-
-                default:
-                  // Неизвестный режим — treat as 'new'
-                  resultStatus = 'new'
-                  console.error(`Unknown DUPLICATE_MODE "${this.duplicateMode}", treating as 'new'`)
-                  break
-              }
-            }
-          }
-        }
-      } catch (duplicateCheckError) {
-        // Если метод не поддерживается (старая схема), продолжаем как 'new'
-        console.error(`Failed to check duplicates: ${duplicateCheckError}`)
-      }
     }
 
     // Result

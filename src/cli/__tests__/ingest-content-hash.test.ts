@@ -135,4 +135,65 @@ describe('CLI ingest — сохранение contentHash в chunks', () => {
     expect(output).toContain('skipped')
     expect(output).toContain('duplicate')
   }, 60000)
+
+  it('повторная загрузка того же файла в skip-режиме не перезаписывает векторы', async () => {
+    const filePath = resolve(testDataDir, 'skip-same-file.txt')
+    const content = 'Одинаковый контент для повторной загрузки. '.repeat(60)
+    writeFileSync(filePath, content)
+
+    // Переопределяем окружение: используем LanceDB (очищается rmSync),
+    // встроенный transformers бэкенд и легкую модель, чтобы не качать большие файлы.
+    const env = {
+      ...process.env,
+      DUPLICATE_MODE: 'skip',
+      VECTORDB_BACKEND: 'lancedb',
+      EMBEDDING_BACKEND: 'transformers',
+      MODEL_NAME: 'Xenova/all-MiniLM-L6-v2',
+    }
+
+    const dbPathArg = `--db-path "${dbPath}"`
+    const cacheDirArg = `--cache-dir ./tmp/test-cli-hash/models`
+    const baseDirArg = `--base-dir "${testDataDir}"`
+    const ingestArgs = `${dbPathArg} ${cacheDirArg} ingest ${baseDirArg} "${filePath}"`
+
+    // Первая загрузка
+    let firstOutput: string
+    try {
+      firstOutput = execSync(`npx mcp-local-rag ${ingestArgs} 2>&1`, {
+        encoding: 'utf-8',
+        shell: true,
+        env,
+      })
+    } catch (e: unknown) {
+      const err = e as { stdout?: string; stderr?: string; message?: string }
+      console.error('First ingest failed:', err.message, err.stdout, err.stderr)
+      throw e
+    }
+    expect(firstOutput).toContain('OK')
+    const firstChunkMatch = firstOutput.match(/\((\d+) chunks\)/)
+    expect(firstChunkMatch).not.toBeNull()
+    const firstChunkCount = Number(firstChunkMatch![1])
+
+    // Вторая загрузка того же файла (дубликат)
+    let secondOutput: string
+    try {
+      secondOutput = execSync(`npx mcp-local-rag ${ingestArgs} 2>&1`, {
+        encoding: 'utf-8',
+        shell: true,
+        env,
+      })
+    } catch (e: unknown) {
+      const err = e as { stdout?: string; stderr?: string; message?: string }
+      console.error('Second ingest failed:', err.message, err.stdout, err.stderr)
+      throw e
+    }
+
+    // Проверяем, что загрузка пропущена и чанки не перезаписаны
+    expect(secondOutput).toContain('skipped')
+    expect(secondOutput).toContain('duplicate')
+    // Не должно быть сообщения об удалении чанков
+    expect(secondOutput).not.toContain('Deleted')
+    // Количество загруженных чанков должно быть 0
+    expect(secondOutput).toContain('(0 chunks)')
+  }, 60000)
 })
