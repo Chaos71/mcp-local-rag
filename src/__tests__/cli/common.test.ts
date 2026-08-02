@@ -87,7 +87,6 @@ describe('cli/common', () => {
     })
 
     it('should construct PostgreSQLVectordb when vectordbBackend is postgresql', () => {
-      // Set PostgreSQL environment variables
       process.env['PG_HOST'] = 'pg.example.com'
       process.env['PG_PORT'] = '5433'
       process.env['PG_DATABASE'] = 'mydb'
@@ -97,7 +96,7 @@ describe('cli/common', () => {
       process.env['PG_MAX_POOL_SIZE'] = '30'
       process.env['PG_MIN_POOL_SIZE'] = '5'
       process.env['PG_SCHEMA'] = 'myschema'
-      process.env['RAG_EMBEDDING_DIMENSIONS'] = '768'
+      process.env['EMBEDDING_SIZE'] = '768'
       process.env['RAG_IVF_LISTS'] = '200'
       process.env['RAG_HYBRID_WEIGHT'] = '0.8'
 
@@ -111,6 +110,8 @@ describe('cli/common', () => {
           embeddingDimension: 768,
           ivfLists: 200,
           hybridWeight: 0.8,
+          useHNSWIndex: false,
+          useHalfvecIndex: false,
           pgConfig: {
             host: 'pg.example.com',
             port: 5433,
@@ -124,7 +125,6 @@ describe('cli/common', () => {
           },
         })
       } finally {
-        // Clean up environment variables
         delete process.env['PG_HOST']
         delete process.env['PG_PORT']
         delete process.env['PG_DATABASE']
@@ -134,16 +134,15 @@ describe('cli/common', () => {
         delete process.env['PG_MAX_POOL_SIZE']
         delete process.env['PG_MIN_POOL_SIZE']
         delete process.env['PG_SCHEMA']
-        delete process.env['RAG_EMBEDDING_DIMENSIONS']
+        delete process.env['EMBEDDING_SIZE']
         delete process.env['RAG_IVF_LISTS']
         delete process.env['RAG_HYBRID_WEIGHT']
       }
     })
 
     it('should use transformer default dimension (384) when embeddingBackend is transformers', () => {
-      // Ensure llama.cpp env vars are not set
       delete process.env['RAG_LLAMA_CPP_DIMENSIONS']
-      delete process.env['RAG_EMBEDDING_DIMENSIONS']
+      delete process.env['EMBEDDING_SIZE']
 
       process.env['PG_HOST'] = 'pg.example.com'
       process.env['PG_PORT'] = '5432'
@@ -186,9 +185,8 @@ describe('cli/common', () => {
     })
 
     it('should use llama-cpp default dimension (4096) when embeddingBackend is llama-cpp', () => {
-      // Ensure llama.cpp env vars are not set
       delete process.env['RAG_LLAMA_CPP_DIMENSIONS']
-      delete process.env['RAG_EMBEDDING_DIMENSIONS']
+      delete process.env['EMBEDDING_SIZE']
 
       process.env['PG_HOST'] = 'pg.example.com'
       process.env['PG_PORT'] = '5432'
@@ -230,9 +228,31 @@ describe('cli/common', () => {
       }
     })
 
-    it('should prefer RAG_LLAMA_CPP_DIMENSIONS over RAG_EMBEDDING_DIMENSIONS for llama-cpp', () => {
+    it('should fall back to LanceDB when PostgreSQL backend is selected but required PG_* env vars are missing', () => {
+      delete process.env['PG_HOST']
+      delete process.env['PG_DATABASE']
+      delete process.env['PG_USER']
+      delete process.env['PG_PASSWORD']
+
+      createVectorStore(
+        makeConfig({
+          dbPath: '/data/my-db',
+          vectordbBackend: 'postgresql',
+        })
+      )
+
+      expect(mocks.PostgreSQLVectordb).not.toHaveBeenCalled()
+      expect(mocks.VectorStore).toHaveBeenCalledOnce()
+      expect(mocks.VectorStore).toHaveBeenCalledWith({
+        backend: 'lancedb',
+        dbPath: '/data/my-db',
+        tableName: 'chunks',
+      })
+    })
+
+    it('should prefer EMBEDDING_SIZE over RAG_LLAMA_CPP_DIMENSIONS for llama-cpp', () => {
       process.env['RAG_LLAMA_CPP_DIMENSIONS'] = '2048'
-      process.env['RAG_EMBEDDING_DIMENSIONS'] = '384'
+      process.env['EMBEDDING_SIZE'] = '384'
 
       process.env['PG_HOST'] = 'pg.example.com'
       process.env['PG_PORT'] = '5432'
@@ -257,11 +277,11 @@ describe('cli/common', () => {
 
         expect(mocks.PostgreSQLVectordb).toHaveBeenCalledOnce()
         expect(mocks.PostgreSQLVectordb).toHaveBeenCalledWith(
-          expect.objectContaining({ embeddingDimension: 2048 })
+          expect.objectContaining({ embeddingDimension: 384 })
         )
       } finally {
         delete process.env['RAG_LLAMA_CPP_DIMENSIONS']
-        delete process.env['RAG_EMBEDDING_DIMENSIONS']
+        delete process.env['EMBEDDING_SIZE']
         delete process.env['PG_HOST']
         delete process.env['PG_PORT']
         delete process.env['PG_DATABASE']
@@ -276,9 +296,9 @@ describe('cli/common', () => {
       }
     })
 
-    it('should fall back to RAG_EMBEDDING_DIMENSIONS when RAG_LLAMA_CPP_DIMENSIONS is invalid for llama-cpp', () => {
+    it('should fall back to EMBEDDING_SIZE when RAG_LLAMA_CPP_DIMENSIONS is invalid for llama-cpp', () => {
       process.env['RAG_LLAMA_CPP_DIMENSIONS'] = 'invalid'
-      process.env['RAG_EMBEDDING_DIMENSIONS'] = '768'
+      process.env['EMBEDDING_SIZE'] = '768'
 
       process.env['PG_HOST'] = 'pg.example.com'
       process.env['PG_PORT'] = '5432'
@@ -307,7 +327,7 @@ describe('cli/common', () => {
         )
       } finally {
         delete process.env['RAG_LLAMA_CPP_DIMENSIONS']
-        delete process.env['RAG_EMBEDDING_DIMENSIONS']
+        delete process.env['EMBEDDING_SIZE']
         delete process.env['PG_HOST']
         delete process.env['PG_PORT']
         delete process.env['PG_DATABASE']

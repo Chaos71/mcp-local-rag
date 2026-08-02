@@ -49,7 +49,6 @@ export function formatCliError(error: unknown): string {
  */
 export function createVectorStore(config: ResolvedGlobalConfig): VectorStore | PostgreSQLVectordb {
   if (config.vectordbBackend === 'postgresql') {
-    // PostgreSQL backend — requires pgConfig with connection details
     const pgConfig = {
       host: process.env['PG_HOST'] ?? 'localhost',
       port: Number.parseInt(process.env['PG_PORT'] ?? '5432', 10) || 5432,
@@ -62,22 +61,29 @@ export function createVectorStore(config: ResolvedGlobalConfig): VectorStore | P
       schema: process.env['PG_SCHEMA'] ?? 'public',
     }
 
-    // Select embedding dimension based on the selected embedding backend.
-    // When using llama.cpp the model produces embeddings of a different
-    // dimensionality (typically 4096 for Qwen3-Embedding-4B) than the
-    // Transformers.js default (384 for all-MiniLM-L6-v2).
-    //
-    // Precedence:
-    //   1. EMBEDDING_SIZE env var (единая настройка для всех бэкендов)
-    //   2. Backend-specific default (4096 for llama-cpp, 384 for transformers)
-    //
-    // This keeps the PostgreSQL table column in sync with the embedder.
+    const missing = []
+    if (!pgConfig.host) missing.push('PG_HOST')
+    if (!pgConfig.database) missing.push('PG_DATABASE')
+    if (!pgConfig.user) missing.push('PG_USER')
+    if (!pgConfig.password) missing.push('PG_PASSWORD')
+
+    if (missing.length > 0) {
+      console.error(
+        `PostgreSQL backend выбран, но не установлены обязательные переменные окружения: ${missing.join(', ')}. ` +
+          `Использую LanceDB вместо PostgreSQL.`
+      )
+      return new VectorStore({
+        backend: 'lancedb',
+        dbPath: config.dbPath,
+        tableName: 'chunks',
+      })
+    }
+
     const defaultTransformerDim = 384
     const defaultLlamaCppDim = 4096
     const defaultDim =
       config.embeddingBackend === 'llama-cpp' ? defaultLlamaCppDim : defaultTransformerDim
 
-    // Use a single environment variable EMBEDDING_SIZE
     const sizeEmbedding = process.env['EMBEDDING_SIZE']
     let embeddingDimension: number
     if (sizeEmbedding) {
@@ -89,12 +95,8 @@ export function createVectorStore(config: ResolvedGlobalConfig): VectorStore | P
     const ivfLists = Number.parseInt(process.env['RAG_IVF_LISTS'] ?? '100', 10) || 100
     const hybridWeight = parseFloat(process.env['RAG_HYBRID_WEIGHT'] ?? '0.6') || 0.6
 
-    // Читаем флаг USE_HALFVEC_INDEX для поддержки размерностей > 2000.
-    // halfvec тип pgvector поддерживает до 4000 измерений (против 2000 для vector).
-    // Требуется pgvector >= 0.7.0.
     const useHalfvecIndex = process.env['USE_HALFVEC_INDEX'] === 'true'
 
-    // Если размерность > 2000 и halfvec не включён — предупреждаем пользователя.
     if (embeddingDimension > 2000 && !useHalfvecIndex) {
       console.error(
         `ПРЕДУПРЕЖДЕНИЕ: Размерность эмбеддингов ${embeddingDimension} превышает лимит 2000 для pgvector. ` +
@@ -102,15 +104,13 @@ export function createVectorStore(config: ResolvedGlobalConfig): VectorStore | P
       )
     }
 
-    // HNSW индекс не используется по умолчанию — только с явным флагом.
     const useHNSWIndex = false
 
-    // Для HNSW индекса ivfLists не требуется, передаем undefined
     return new PostgreSQLVectordb({
       backend: 'postgresql' as const,
       tableName: 'chunks',
       embeddingDimension,
-      ...(useHNSWIndex ? {} : { ivfLists }), // Передаем ivfLists только если не HNSW
+      ...(useHNSWIndex ? {} : { ivfLists }),
       useHNSWIndex,
       useHalfvecIndex,
       hybridWeight,
@@ -118,7 +118,6 @@ export function createVectorStore(config: ResolvedGlobalConfig): VectorStore | P
     })
   }
 
-  // Default: LanceDB (backward compatible)
   return new VectorStore({
     backend: 'lancedb',
     dbPath: config.dbPath,
